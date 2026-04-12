@@ -21,6 +21,47 @@ import { CompetitionKey, DatasetMap, GameRow, PlayerRow, TeamRow } from "@/lib/t
 
 const STORAGE_KEY = "lnb-predictor-data-v7-renovated-leagues";
 
+type PersistedState =
+  | DatasetMap
+  | {
+      data: DatasetMap;
+      competition?: CompetitionKey;
+      homeTeam?: string;
+      awayTeam?: string;
+    };
+
+function isDatasetMap(value: unknown): value is DatasetMap {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as DatasetMap).teams) &&
+    Array.isArray((value as DatasetMap).players) &&
+    Array.isArray((value as DatasetMap).games)
+  );
+}
+
+function isCompetitionKey(value: unknown): value is CompetitionKey {
+  return typeof value === "string" && competitionLabels.includes(value as CompetitionKey);
+}
+
+function resolvePersistedState(parsed: PersistedState) {
+  if (isDatasetMap(parsed)) {
+    return {
+      data: parsed,
+      competition: CURRENT_COMPETITION,
+      homeTeam: undefined,
+      awayTeam: undefined
+    };
+  }
+
+  return {
+    data: parsed.data,
+    competition: isCompetitionKey(parsed.competition) ? parsed.competition : CURRENT_COMPETITION,
+    homeTeam: parsed.homeTeam,
+    awayTeam: parsed.awayTeam
+  };
+}
+
 function getDefaultTeams(data: DatasetMap, competition: CompetitionKey) {
   const filtered = data.teams.filter((team) => team.competition === competition);
   return {
@@ -36,34 +77,44 @@ export default function HomePage() {
   const [homeTeam, setHomeTeam] = useState(defaults.home);
   const [awayTeam, setAwayTeam] = useState(defaults.away);
   const [updateStatus, setUpdateStatus] = useState("Listo para sincronizar con Genius.");
+  const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
-    const syncFromStorage = () => {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      if (!stored) {
-        return;
-      }
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (!stored) {
+      setIsHydrated(true);
+      return;
+    }
 
-      try {
-        const parsed = JSON.parse(stored) as DatasetMap;
-        const nextCompetition = CURRENT_COMPETITION;
-        const teams = getDefaultTeams(parsed, nextCompetition);
-        setData(parsed);
-        setCompetition(nextCompetition);
-        setHomeTeam(teams.home);
-        setAwayTeam(teams.away);
-      } catch {
-        window.localStorage.removeItem(STORAGE_KEY);
-      }
-    };
-
-    const timer = window.setTimeout(syncFromStorage, 0);
-    return () => window.clearTimeout(timer);
+    try {
+      const persisted = resolvePersistedState(JSON.parse(stored) as PersistedState);
+      const teams = getDefaultTeams(persisted.data, persisted.competition);
+      setData(persisted.data);
+      setCompetition(persisted.competition);
+      setHomeTeam(persisted.homeTeam || teams.home);
+      setAwayTeam(persisted.awayTeam || teams.away);
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } finally {
+      setIsHydrated(true);
+    }
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data]);
+    if (!isHydrated) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        data,
+        competition,
+        homeTeam,
+        awayTeam
+      })
+    );
+  }, [awayTeam, competition, data, homeTeam, isHydrated]);
 
   const replaceCompetitionRows = <T extends { competition: string }>(
     currentRows: T[],

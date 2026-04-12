@@ -24,3 +24,6 @@ pnpm-debug.log*
 
 # OS/editor
 .DS_Store
+
+# Other local projects accidentally copied into this workspace
+plantas\ /
