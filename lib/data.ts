@@ -278,12 +278,12 @@ const teamSeeds: TeamRow[] = [
 ];
 
 const ligaDosTeamSeeds: TeamRow[] = [
-  ["LDOS-HUM", "Zona A", "CD Humboldt", "Vina del Mar", "2", "2", "0", "142", "116"],
-  ["LDOS-SPO", "Zona A", "Sportiva Italiana", "Valparaiso", "2", "2", "0", "168", "145"],
-  ["LDOS-QUI", "Zona A", "Quilpue Basquetbol", "Quilpue", "2", "1", "1", "140", "115"],
-  ["LDOS-ILL", "Zona A", "Illapel Basquetbol", "Illapel", "2", "1", "1", "157", "165"],
-  ["LDOS-ARA", "Zona A", "Arabe de Valparaiso", "Valparaiso", "2", "0", "2", "143", "167"],
-  ["LDOS-SHA", "Zona A", "CD Sharks", "La Serena", "2", "0", "2", "137", "179"],
+  ["LDOS-SPO", "Zona A", "Sportiva Italiana", "Valparaiso", "3", "3", "0", "251", "212"],
+  ["LDOS-ILL", "Zona A", "Illapel Basquetbol", "Illapel", "3", "2", "1", "243", "215"],
+  ["LDOS-HUM", "Zona A", "CD Humboldt", "Vina del Mar", "3", "2", "1", "192", "202"],
+  ["LDOS-ARA", "Zona A", "Arabe de Valparaiso", "Valparaiso", "3", "1", "2", "214", "230"],
+  ["LDOS-QUI", "Zona A", "Quilpue Basquetbol", "Quilpue", "3", "1", "2", "203", "186"],
+  ["LDOS-SHA", "Zona A", "CD Sharks", "La Serena", "3", "0", "3", "204", "262"],
   ["LDOS-STA", "Zona B", "Stadio Italiano", "Las Condes", "3", "2", "1", "230", "207"],
   ["LDOS-LML", "Zona B", "Luis Matte Larrain", "Puente Alto", "3", "2", "1", "244", "223"],
   ["LDOS-SAN", "Zona B", "San Luis Basquet", "Quillota", "3", "2", "1", "244", "225"],
@@ -296,11 +296,11 @@ const ligaDosTeamSeeds: TeamRow[] = [
   ["LDOS-VIL", "Zona C", "Villa Alemana Basquet", "Villa Alemana", "3", "1", "2", "162", "206"],
   ["LDOS-LIC", "Zona C", "Liceo Curico", "Curico", "3", "0", "3", "233", "266"],
   ["LDOS-MCH", "Zona C", "Municipal Chillan", "Chillan", "3", "0", "3", "159", "230"],
-  ["LDOS-UDE", "Zona D", "UDE Temuco", "Temuco", "2", "2", "0", "164", "142"],
+  ["LDOS-UDE", "Zona D", "UDE Temuco", "Temuco", "3", "3", "0", "246", "207"],
   ["LDOS-OMG", "Zona D", "CD Omega", "Concepcion", "3", "1", "2", "213", "243"],
   ["LDOS-EAP", "Zona D", "Escolar Aleman Puerto Varas", "Puerto Varas", "2", "1", "1", "154", "138"],
   ["LDOS-HUA", "Zona D", "CD Huachipato", "Talcahuano", "2", "1", "1", "150", "150"],
-  ["LDOS-LAU", "Zona D", "CDB La Union", "La Union", "1", "0", "1", "75", "83"]
+  ["LDOS-LAU", "Zona D", "CDB La Union", "La Union", "2", "0", "2", "140", "165"]
 ].map(([teamId, zone, name, city, gamesPlayed, wins, losses, pointsFor, pointsAgainst]) => ({
   teamId,
   competition: LIGA_DOS_COMPETITION,

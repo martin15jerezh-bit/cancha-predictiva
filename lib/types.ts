@@ -31,6 +31,19 @@ export type PlayerRow = {
   points: string;
   rebounds: string;
   assists: string;
+  offensiveRebounds?: string;
+  defensiveRebounds?: string;
+  steals?: string;
+  turnovers?: string;
+  fouls?: string;
+  twoMade?: string;
+  twoAttempted?: string;
+  threeMade?: string;
+  threeAttempted?: string;
+  freeThrowsMade?: string;
+  freeThrowsAttempted?: string;
+  starter?: string;
+  games?: string;
 };
 
 export type GameRow = {

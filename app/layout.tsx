@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Cancha Predictiva LNB",
-  description: "Analisis, boxscores y predicciones para la Liga Chery Apertura 2026."
+  title: "DOS Scout Pro",
+  description: "Scouting, analisis tactico e ingestion Genius Sports para Liga DOS Chile."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
