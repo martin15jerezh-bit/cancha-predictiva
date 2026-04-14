@@ -32,10 +32,69 @@ export type QualitySignal = {
   confidence: number;
 };
 
+export type DecisionInsight = {
+  label: string;
+  value: string;
+  action: string;
+  evidence: EvidenceLevel;
+  confidence: number;
+  tone: "advantage" | "risk" | "neutral";
+};
+
+export type TacticalKey = {
+  title: string;
+  action: string;
+  why: string;
+  trigger: string;
+  evidence: EvidenceLevel;
+  confidence: number;
+};
+
+export type TeamIdentity = {
+  summary: string;
+  rhythm: string;
+  offensiveStyle: string;
+  defensiveStyle: string;
+  playerDependency: string;
+  clutchBehavior: string;
+  evidence: EvidenceLevel;
+  confidence: number;
+};
+
+export type PredictionModel = {
+  ownWinProbability: number;
+  rivalWinProbability: number;
+  expectedMargin: number;
+  marginRange: string;
+  trend: string;
+  confidence: number;
+  evidence: EvidenceLevel;
+};
+
+export type PlanValidationCheck = {
+  label: string;
+  projected: string;
+  actual: string;
+  status: "logrado" | "fallo" | "pendiente";
+  decision: string;
+  evidence: EvidenceLevel;
+  confidence: number;
+};
+
+export type PlanValidation = {
+  headline: string;
+  checks: PlanValidationCheck[];
+};
+
 export type PlayerScout = {
   name: string;
   teamName: string;
   role: string;
+  playerType: string;
+  strength: string;
+  weakness: string;
+  defensiveKey: string;
+  decisionTrigger: string;
   games: number;
   minutes: number;
   points: number;
@@ -57,6 +116,10 @@ export type RotationScout = {
   firstChanges: string[];
   coreRotation: string[];
   closers: string[];
+  lineupStability: string;
+  benchDependency: string;
+  benchImpact: string;
+  pressureClosers: string;
   confidence: number;
   evidence: EvidenceLevel;
   rule: string;
@@ -67,6 +130,8 @@ export type QuarterScout = {
   pointsFor: number;
   pointsAgainst: number;
   differential: number;
+  momentum: string;
+  recommendation: string;
   evidence: EvidenceLevel;
   confidence: number;
 };
@@ -91,6 +156,13 @@ export type MatchupScout = {
   ownRotation: RotationScout;
   rivalRotation: RotationScout;
   quarterModel: QuarterScout[];
+  decisionBrief: DecisionInsight[];
+  tacticalKeysCore: TacticalKey[];
+  rivalIdentity: TeamIdentity;
+  ownIdentity: TeamIdentity;
+  prediction: PredictionModel;
+  planValidation: PlanValidation;
+  playerModeBrief: string[];
   tacticalKeys: QualitySignal[];
   comparison: QualitySignal[];
   reportSections: string[];
@@ -159,6 +231,14 @@ function minutesToNumber(value: string) {
 
 function round(value: number, digits = 1) {
   return Number(value.toFixed(digits));
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function percent(value: number) {
+  return `${Math.round(value)}%`;
 }
 
 function filterGamesByLocality(games: GameRow[], teamName: string, locality: ScoutingFilters["locality"]) {
@@ -248,6 +328,57 @@ function buildPlayerScout(player: PlayerRow, team: TeamRow): PlayerScout {
   const estimatedOffensiveVolume = points + assists * 2.1 + rebounds * 0.35 + steals * 0.8 - turnovers * 0.9;
   const recentImpactIndex = estimatedOffensiveVolume + minutes * 0.25 + getWinPct(team) * 8 - fouls * 0.3;
   const threatIndex = points * 1.2 + rebounds * 0.7 + assists * 1.4 + steals * 1.1 + minutes * 0.18 - turnovers * 0.5;
+  const shootingEfficiency = totalAttempts === 0 ? null : round(weightedMakes / (totalAttempts * 2), 2);
+  const playerType =
+    points >= 18
+      ? "Scorer dominante"
+      : assists >= 5
+        ? "Generador primario"
+        : rebounds >= 8
+          ? "Reboteador / posesiones"
+          : shootingEfficiency !== null && shootingEfficiency >= 0.62
+            ? "Finalizador eficiente"
+            : minutes >= 22
+              ? "Conector de rotacion"
+              : "Energia situacional";
+  const strength =
+    playerType === "Scorer dominante"
+      ? `volumen alto: ${round(points)} PTS/PJ`
+      : playerType === "Generador primario"
+        ? `creacion: ${round(assists)} AST/PJ`
+        : playerType === "Reboteador / posesiones"
+          ? `posesiones extra: ${round(rebounds)} REB/PJ`
+          : shootingEfficiency !== null && shootingEfficiency >= 0.58
+            ? `eficiencia de tiro ${shootingEfficiency}`
+            : `sostiene ${round(minutes)} MIN/PJ`;
+  const weakness =
+    shootingEfficiency !== null && shootingEfficiency < 0.48
+      ? "baja eficiencia si se fuerza tiro contestado"
+      : totalTurnovers > 0 && totalAssists / Math.max(totalTurnovers, 1) < 1
+        ? "toma decisiones vulnerable bajo presion"
+        : rebounds < 3 && minutes >= 20
+          ? "poco impacto en tablero para sus minutos"
+          : points < 7 && minutes >= 18
+            ? "bajo volumen anotador si se le niega ritmo"
+            : "obligarlo a ejecutar fuera de su primera lectura";
+  const defensiveKey =
+    playerType === "Scorer dominante"
+      ? "sacar el balon de sus manos antes de que entre en ritmo"
+      : playerType === "Generador primario"
+        ? "negar eje central y forzar pase lateral temprano"
+        : playerType === "Reboteador / posesiones"
+          ? "bloqueo de rebote fisico; no mirar la pelota"
+          : shootingEfficiency !== null && shootingEfficiency >= 0.62
+            ? "no conceder catch and finish limpio"
+            : "hacerlo decidir con contacto y reloj bajo";
+  const decisionTrigger =
+    points >= 14
+      ? `si supera ${Math.ceil(points + 4)} puntos, cambiar cobertura o enviar ayuda temprana`
+      : assists >= 5
+        ? `si llega a ${Math.ceil(assists + 2)} asistencias, negar recepcion central`
+        : rebounds >= 8
+          ? `si captura ${Math.ceil(rebounds + 3)} rebotes, cerrar con lineup de mas tablero`
+          : `si supera ${Math.ceil(minutes + 4)} minutos de impacto, ajustar matchup secundario`;
   const role =
     minutes >= 28
       ? "Eje de rotacion"
@@ -263,6 +394,11 @@ function buildPlayerScout(player: PlayerRow, team: TeamRow): PlayerScout {
     name: player.name,
     teamName: player.teamName,
     role,
+    playerType,
+    strength,
+    weakness,
+    defensiveKey,
+    decisionTrigger,
     games,
     minutes: round(minutes),
     points: round(points),
@@ -271,7 +407,7 @@ function buildPlayerScout(player: PlayerRow, team: TeamRow): PlayerScout {
     pointsPerMinute: round(pointsPerMinute, 2),
     reboundsPerMinute: round(reboundsPerMinute, 2),
     assistTurnoverRatio: totalTurnovers === 0 ? (totalAssists > 0 ? totalAssists : null) : round(totalAssists / totalTurnovers, 2),
-    shootingEfficiency: totalAttempts === 0 ? null : round(weightedMakes / (totalAttempts * 2), 2),
+    shootingEfficiency,
     estimatedOffensiveVolume: round(estimatedOffensiveVolume),
     recentImpactIndex: round(recentImpactIndex),
     threatIndex: round(threatIndex),
@@ -355,12 +491,44 @@ function buildTeamScout(team: TeamRow, games: GameRow[], filters: ScoutingFilter
 function buildRotation(players: PlayerScout[]): RotationScout {
   const ordered = [...players].sort((a, b) => b.minutes - a.minutes || b.recentImpactIndex - a.recentImpactIndex);
   const confidence = ordered.length >= 8 ? 0.72 : ordered.length >= 5 ? 0.58 : 0.38;
+  const starterMinutes = ordered.slice(0, 5).reduce((sum, player) => sum + player.minutes, 0);
+  const benchMinutes = ordered.slice(5, 9).reduce((sum, player) => sum + player.minutes, 0);
+  const totalRotationMinutes = Math.max(starterMinutes + benchMinutes, 1);
+  const benchShare = benchMinutes / totalRotationMinutes;
+  const lineupStability =
+    ordered.length >= 8 && ordered[4]?.minutes - (ordered[5]?.minutes ?? 0) >= 4
+      ? "Alta: top 5 claramente separado por minutos"
+      : ordered.length >= 7
+        ? "Media: quinteto probable con banca cercana"
+        : "Baja: muestra insuficiente o rotacion abierta";
+  const benchDependency =
+    benchShare >= 0.34
+      ? "Alta: la banca sostiene una parte relevante del volumen"
+      : benchShare >= 0.24
+        ? "Media: banca funcional para cambiar ritmo"
+        : "Baja: alta carga sobre titulares";
+  const benchImpactPlayers = ordered.slice(5, 9).filter((player) => player.recentImpactIndex >= 12);
+  const benchImpact =
+    benchImpactPlayers.length >= 2
+      ? `Banco con impacto: ${benchImpactPlayers.slice(0, 2).map((player) => player.name).join(", ")}`
+      : benchImpactPlayers[0]
+        ? `Banco condicionado a ${benchImpactPlayers[0].name}`
+        : "Banco de bajo impacto estadistico";
+  const pressureClosers = [...ordered]
+    .sort((a, b) => b.recentImpactIndex - a.recentImpactIndex || b.minutes - a.minutes)
+    .slice(0, 5)
+    .map((player) => player.name)
+    .join(", ");
 
   return {
     starters: ordered.slice(0, 5).map((player) => player.name),
     firstChanges: ordered.slice(5, 7).map((player) => player.name),
     coreRotation: ordered.slice(0, 9).map((player) => player.name),
     closers: [...ordered].sort((a, b) => b.recentImpactIndex - a.recentImpactIndex).slice(0, 5).map((player) => player.name),
+    lineupStability,
+    benchDependency,
+    benchImpact,
+    pressureClosers: pressureClosers || "sin muestra suficiente",
     confidence,
     evidence: "inferencia estadistica",
     rule: "Ultimos registros disponibles, minutos, consistencia de aparicion e indice de impacto reciente."
@@ -389,6 +557,18 @@ function buildQuarterModel(own: TeamRow, rival: TeamRow): QuarterScout[] {
       pointsFor,
       pointsAgainst,
       differential: round(pointsFor - pointsAgainst),
+      momentum:
+        pointsFor - pointsAgainst >= 2
+          ? "dominio proyectado"
+          : pointsFor - pointsAgainst <= -2
+            ? "riesgo de caida"
+            : "tramo neutro",
+      recommendation:
+        pointsFor - pointsAgainst >= 2
+          ? "subir agresividad ofensiva y buscar parcial"
+          : pointsFor - pointsAgainst <= -2
+            ? "bajar ritmo, proteger rebote y evitar bonus"
+            : "administrar faltas y sostener calidad de tiro",
       evidence: "inferencia estadistica",
       confidence: 0.52
     };
@@ -429,6 +609,312 @@ function buildComparison(ownTeam: TeamScout, rivalTeam: TeamScout, ownPlayers: P
   ];
 }
 
+function buildTeamIdentity(teamScout: TeamScout, players: PlayerScout[], rotation: RotationScout): TeamIdentity {
+  const team = teamScout.team;
+  const pointsFor = getPointsForPerGame(team);
+  const pointsAgainst = getPointsAgainstPerGame(team);
+  const topScorer = players[0];
+  const topThreePoints = players.slice(0, 3).reduce((sum, player) => sum + player.points, 0);
+  const dependency = pointsFor > 0 ? topThreePoints / pointsFor : 0;
+  const rhythm = pointsFor >= 82 ? "Ritmo alto" : pointsFor <= 70 ? "Ritmo bajo / controlado" : "Ritmo medio";
+  const offensiveStyle =
+    topScorer?.assists >= 5
+      ? "ofensiva iniciada por generador principal"
+      : topScorer?.points >= 18
+        ? "ofensiva dependiente de scorer de volumen"
+        : getAssistsPerGame(team) >= 15
+          ? "ofensiva colectiva con buena circulacion"
+          : "ofensiva de baja asistencia, mas posesiones individuales";
+  const defensiveStyle =
+    pointsAgainst <= 70
+      ? "defensa compacta que sostiene margen"
+      : pointsAgainst >= 82
+        ? "defensa vulnerable a parciales largos"
+        : "defensa competitiva, sensible al rebote y balance";
+  const playerDependency =
+    dependency >= 0.58
+      ? "alta dependencia del top 3 ofensivo"
+      : dependency >= 0.44
+        ? "dependencia media de sus lideres"
+        : "produccion relativamente distribuida";
+  const clutchBehavior =
+    getPointDifferential(team) >= 6
+      ? "cierres favorables si llega con control de ritmo"
+      : getPointDifferential(team) <= -6
+        ? "sufre si el partido entra en posesiones de presion"
+        : "clutch de margen fino; el cierre depende de ejecucion y faltas";
+
+  return {
+    summary: `Equipo ${rhythm.toLowerCase()} con ${offensiveStyle}; ${playerDependency}.`,
+    rhythm,
+    offensiveStyle,
+    defensiveStyle,
+    playerDependency,
+    clutchBehavior: `${clutchBehavior}. ${rotation.pressureClosers}`,
+    evidence: "inferencia estadistica",
+    confidence: players.length >= 8 ? 0.72 : 0.55
+  };
+}
+
+function buildPrediction(ownTeam: TeamScout, rivalTeam: TeamScout): PredictionModel {
+  const own = ownTeam.team;
+  const rival = rivalTeam.team;
+  const ownExpected = (getPointsForPerGame(own) + getPointsAgainstPerGame(rival)) / 2;
+  const rivalExpected = (getPointsForPerGame(rival) + getPointsAgainstPerGame(own)) / 2;
+  const expectedMargin = round(ownExpected - rivalExpected);
+  const winDelta = (getWinPct(own) - getWinPct(rival)) * 18;
+  const marginDelta = (getPointDifferential(own) - getPointDifferential(rival)) * 1.8;
+  const ownWinProbability = round(clamp(50 + winDelta + marginDelta, 18, 82), 0);
+  const rivalWinProbability = 100 - ownWinProbability;
+  const confidence = clamp(0.52 + Math.min(parseNumber(own.gamesPlayed), parseNumber(rival.gamesPlayed), 5) * 0.035, 0.52, 0.74);
+
+  return {
+    ownWinProbability,
+    rivalWinProbability,
+    expectedMargin,
+    marginRange: `${round(expectedMargin - 6)} a ${round(expectedMargin + 6)} pts`,
+    trend:
+      ownWinProbability >= 58
+        ? "tendencia favorable si se controla el primer rebote"
+        : ownWinProbability <= 42
+          ? "tendencia de riesgo; requiere ganar margen de posesiones"
+          : "partido de posesiones cortas y cierre ajustado",
+    confidence,
+    evidence: "inferencia estadistica"
+  };
+}
+
+function buildDecisionBrief(modelLike: {
+  ownTeam: TeamScout;
+  rivalTeam: TeamScout;
+  ownPlayers: PlayerScout[];
+  rivalPlayers: PlayerScout[];
+  quarterModel: QuarterScout[];
+  prediction: PredictionModel;
+}): DecisionInsight[] {
+  const own = modelLike.ownTeam.team;
+  const rival = modelLike.rivalTeam.team;
+  const topOwn = modelLike.ownPlayers[0];
+  const topRival = modelLike.rivalPlayers[0];
+  const bestQuarter = [...modelLike.quarterModel].sort((a, b) => b.differential - a.differential)[0];
+  const riskQuarter = [...modelLike.quarterModel].sort((a, b) => a.differential - b.differential)[0];
+  const differentialGap = round(getPointDifferential(own) - getPointDifferential(rival));
+
+  return [
+    {
+      label: "Ventaja principal",
+      value: differentialGap >= 0 ? `+${differentialGap} diferencial vs rival` : `${differentialGap} diferencial vs rival`,
+      action: differentialGap >= 0 ? "acelerar el inicio para transformar ventaja en parcial" : "jugar posesiones largas y reducir perdidas",
+      evidence: "dato confirmado",
+      confidence: 0.86,
+      tone: differentialGap >= 0 ? "advantage" : "risk"
+    },
+    {
+      label: "Riesgo principal",
+      value: topRival ? `${topRival.name}: ${topRival.points} PTS/PJ` : "sin muestra individual",
+      action: topRival ? topRival.defensiveKey : "validar amenaza con video antes de cerrar plan",
+      evidence: topRival ? "inferencia estadistica" : "conclusion tactica",
+      confidence: topRival ? 0.72 : 0.35,
+      tone: "risk"
+    },
+    {
+      label: "Matchup clave",
+      value: topOwn && topRival ? `${topOwn.name} vs ${topRival.name}` : "matchup por definir",
+      action: topOwn ? `cargar ventajas desde ${topOwn.name} y obligar ayudas tempranas` : "priorizar lectura de primeros 5 minutos",
+      evidence: "conclusion tactica",
+      confidence: topOwn && topRival ? 0.68 : 0.4,
+      tone: "neutral"
+    },
+    {
+      label: "Cuarto a atacar",
+      value: `${bestQuarter.quarter}: ${bestQuarter.differential >= 0 ? "+" : ""}${bestQuarter.differential}`,
+      action: bestQuarter.recommendation,
+      evidence: bestQuarter.evidence,
+      confidence: bestQuarter.confidence,
+      tone: bestQuarter.differential >= 0 ? "advantage" : "neutral"
+    },
+    {
+      label: "Cuarto a sobrevivir",
+      value: `${riskQuarter.quarter}: ${riskQuarter.differential}`,
+      action: riskQuarter.recommendation,
+      evidence: riskQuarter.evidence,
+      confidence: riskQuarter.confidence,
+      tone: riskQuarter.differential < 0 ? "risk" : "neutral"
+    },
+    {
+      label: "Prediccion",
+      value: `${modelLike.prediction.ownWinProbability}% victoria | margen ${modelLike.prediction.marginRange}`,
+      action: modelLike.prediction.trend,
+      evidence: modelLike.prediction.evidence,
+      confidence: modelLike.prediction.confidence,
+      tone: modelLike.prediction.ownWinProbability >= 55 ? "advantage" : modelLike.prediction.ownWinProbability <= 45 ? "risk" : "neutral"
+    }
+  ];
+}
+
+function buildCoreKeys(
+  ownTeam: TeamScout,
+  rivalTeam: TeamScout,
+  ownPlayers: PlayerScout[],
+  rivalPlayers: PlayerScout[],
+  quarterModel: QuarterScout[]
+): TacticalKey[] {
+  const topRival = rivalPlayers[0];
+  const topOwn = ownPlayers[0];
+  const bestQuarter = [...quarterModel].sort((a, b) => b.differential - a.differential)[0];
+  const reboundingRisk = getReboundsPerGame(rivalTeam.team) - getReboundsPerGame(ownTeam.team);
+
+  return [
+    {
+      title: "Clave 1 | Cortar la primera ventaja rival",
+      action: topRival ? topRival.defensiveKey : "negar ventaja central y obligar al rival a jugar segunda opcion",
+      why: topRival ? `${topRival.name} concentra ${topRival.points} PTS/PJ y amenaza ${topRival.threatIndex}.` : "La muestra individual aun no es suficiente.",
+      trigger: topRival ? topRival.decisionTrigger : "si el rival encadena 2 posesiones limpias, cambiar cobertura",
+      evidence: topRival ? "inferencia estadistica" : "conclusion tactica",
+      confidence: topRival ? 0.72 : 0.42
+    },
+    {
+      title: "Clave 2 | Atacar nuestra ventaja primaria",
+      action: topOwn ? `usar a ${topOwn.name} como primera fuente de ventaja y castigar ayudas` : "generar paint touch antes del primer tiro exterior",
+      why: topOwn ? `${topOwn.name} lidera impacto propio con ${topOwn.points} PTS/PJ y ${topOwn.recentImpactIndex} de impacto.` : "Sin muestra individual suficiente.",
+      trigger: "si el rival cambia matchup, buscar el emparejamiento debil en los siguientes 2 ataques",
+      evidence: topOwn ? "inferencia estadistica" : "conclusion tactica",
+      confidence: topOwn ? 0.7 : 0.4
+    },
+    {
+      title: "Clave 3 | Controlar margen de posesiones",
+      action: reboundingRisk > 2 ? "cerrar rebote con cinco y correr solo con posesion limpia" : "subir ritmo despues de rebote defensivo asegurado",
+      why: `Diferencia de rebote estimada: ${round(reboundingRisk)} REB/PJ para el rival.`,
+      trigger: "si concedemos 2 rebotes ofensivos en un cuarto, entra lineup de mayor tablero",
+      evidence: getReboundsPerGame(rivalTeam.team) > 0 ? "dato confirmado" : "inferencia estadistica",
+      confidence: 0.74
+    },
+    {
+      title: `Clave 4 | Ganar el ${bestQuarter.quarter}`,
+      action: bestQuarter.recommendation,
+      why: `El modelo proyecta diferencial ${bestQuarter.differential} en ese cuarto.`,
+      trigger: "si el parcial cae bajo -4, bajar ritmo y buscar tiro de alto porcentaje",
+      evidence: bestQuarter.evidence,
+      confidence: bestQuarter.confidence
+    }
+  ];
+}
+
+function findLatestHeadToHead(games: GameRow[], ownName: string, rivalName: string) {
+  return games
+    .filter((game) => {
+      const teamsMatch =
+        (areSameTeam(game.homeTeam, ownName) && areSameTeam(game.awayTeam, rivalName)) ||
+        (areSameTeam(game.homeTeam, rivalName) && areSameTeam(game.awayTeam, ownName));
+      return teamsMatch && game.status === "Final";
+    })
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+}
+
+function buildPlanValidation(
+  games: GameRow[],
+  ownTeam: TeamScout,
+  rivalTeam: TeamScout,
+  rivalPlayers: PlayerScout[],
+  quarterModel: QuarterScout[],
+  prediction: PredictionModel
+): PlanValidation {
+  const latest = findLatestHeadToHead(games, ownTeam.team.name, rivalTeam.team.name);
+  const projectedQuarter = [...quarterModel].sort((a, b) => b.differential - a.differential)[0];
+  const topRival = rivalPlayers[0];
+
+  if (!latest) {
+    return {
+      headline: "Validacion pendiente: no hay partido final importado entre estos equipos.",
+      checks: [
+        {
+          label: "Margen proyectado",
+          projected: `${prediction.expectedMargin} pts (${prediction.marginRange})`,
+          actual: "pendiente de resultado final",
+          status: "pendiente",
+          decision: "cargar boxscore al terminar el partido para cerrar aprendizaje",
+          evidence: "inferencia estadistica",
+          confidence: prediction.confidence
+        },
+        {
+          label: "Control de amenaza",
+          projected: topRival ? `${topRival.name} bajo ${Math.ceil(topRival.points + 2)} pts` : "sin amenaza identificada",
+          actual: "pendiente de boxscore jugador",
+          status: "pendiente",
+          decision: "validar si la cobertura redujo volumen o solo eficiencia",
+          evidence: "inferencia estadistica",
+          confidence: topRival ? 0.62 : 0.35
+        },
+        {
+          label: `Cuarto clave ${projectedQuarter.quarter}`,
+          projected: `diferencial ${projectedQuarter.differential}`,
+          actual: "pendiente de parciales oficiales",
+          status: "pendiente",
+          decision: "agregar quarter_stats para evaluacion automatica fina",
+          evidence: "inferencia estadistica",
+          confidence: projectedQuarter.confidence
+        }
+      ]
+    };
+  }
+
+  const ownWasHome = areSameTeam(latest.homeTeam, ownTeam.team.name);
+  const actualOwn = parseNumber(ownWasHome ? latest.homeScore : latest.awayScore);
+  const actualRival = parseNumber(ownWasHome ? latest.awayScore : latest.homeScore);
+  const actualMargin = actualOwn - actualRival;
+  const marginHit = Math.abs(actualMargin - prediction.expectedMargin) <= 6;
+
+  return {
+    headline: marginHit ? "Plan dentro del rango proyectado." : "Plan fuera del rango: revisar ejecucion y supuestos.",
+    checks: [
+      {
+        label: "Margen de partido",
+        projected: `${prediction.expectedMargin} pts (${prediction.marginRange})`,
+        actual: `${actualMargin} pts | marcador ${actualOwn}-${actualRival}`,
+        status: marginHit ? "logrado" : "fallo",
+        decision: marginHit ? "mantener supuestos principales" : "revisar control de ritmo, perdidas y rebote",
+        evidence: "dato confirmado",
+        confidence: 0.86
+      },
+      {
+        label: "Control de amenaza",
+        projected: topRival ? `${topRival.name} bajo ${Math.ceil(topRival.points + 2)} pts` : "sin amenaza identificada",
+        actual: "requiere boxscore individual del partido",
+        status: "pendiente",
+        decision: "importar Estadisticas completas para cerrar control individual",
+        evidence: "inferencia estadistica",
+        confidence: topRival ? 0.62 : 0.35
+      },
+      {
+        label: `Cuarto clave ${projectedQuarter.quarter}`,
+        projected: `diferencial ${projectedQuarter.differential}`,
+        actual: "sin quarter_stats confirmados",
+        status: "pendiente",
+        decision: "guardar parciales por cuarto desde boxscore o carga manual",
+        evidence: "inferencia estadistica",
+        confidence: projectedQuarter.confidence
+      }
+    ]
+  };
+}
+
+function buildPlayerModeBrief(modelLike: {
+  rivalIdentity: TeamIdentity;
+  rivalPlayers: PlayerScout[];
+  tacticalKeysCore: TacticalKey[];
+  prediction: PredictionModel;
+}) {
+  const topRival = modelLike.rivalPlayers[0];
+  return [
+    `Quienes son: ${modelLike.rivalIdentity.summary}`,
+    `Quien manda: ${topRival ? `${topRival.name} (${topRival.playerType})` : "sin lider claro en muestra"}`,
+    `Que hacen bien: ${modelLike.rivalIdentity.offensiveStyle}`,
+    `Que hacen mal: ${topRival ? topRival.weakness : "dependen de ejecucion y ritmo"}`,
+    `Que debemos hacer: ${modelLike.tacticalKeysCore[0]?.action ?? "negar primera ventaja y cerrar rebote"}`,
+    `Tendencia: ${modelLike.prediction.ownWinProbability}% victoria propia, confianza ${percent(modelLike.prediction.confidence * 100)}`
+  ];
+}
+
 export function buildScoutingModel(
   data: DatasetMap,
   competition: CompetitionKey,
@@ -460,15 +946,31 @@ export function buildScoutingModel(
   const bestQuarter = [...quarterModel].sort((a, b) => b.differential - a.differential)[0];
   const holdQuarter = [...quarterModel].sort((a, b) => a.differential - b.differential)[0];
   const comparison = buildComparison(ownTeam, rivalTeam, ownPlayers, rivalPlayers);
+  const ownRotation = buildRotation(ownPlayers);
+  const rivalRotation = buildRotation(rivalPlayers);
+  const ownIdentity = buildTeamIdentity(ownTeam, ownPlayers, ownRotation);
+  const rivalIdentity = buildTeamIdentity(rivalTeam, rivalPlayers, rivalRotation);
+  const prediction = buildPrediction(ownTeam, rivalTeam);
+  const tacticalKeysCore = buildCoreKeys(ownTeam, rivalTeam, ownPlayers, rivalPlayers, quarterModel);
+  const decisionBrief = buildDecisionBrief({ ownTeam, rivalTeam, ownPlayers, rivalPlayers, quarterModel, prediction });
+  const planValidation = buildPlanValidation(games, ownTeam, rivalTeam, rivalPlayers, quarterModel, prediction);
+  const playerModeBrief = buildPlayerModeBrief({ rivalIdentity, rivalPlayers, tacticalKeysCore, prediction });
 
   return {
     ownTeam,
     rivalTeam,
     ownPlayers,
     rivalPlayers,
-    ownRotation: buildRotation(ownPlayers),
-    rivalRotation: buildRotation(rivalPlayers),
+    ownRotation,
+    rivalRotation,
     quarterModel,
+    decisionBrief,
+    tacticalKeysCore,
+    rivalIdentity,
+    ownIdentity,
+    prediction,
+    planValidation,
+    playerModeBrief,
     comparison,
     tacticalKeys: [
       ...comparison,
@@ -485,19 +987,18 @@ export function buildScoutingModel(
         confidence: holdQuarter.confidence
       }
     ],
-    reportSections: ["Prepartido", "Postpartido", "Reporte tecnico largo", "Resumen ejecutivo"],
+    reportSections: ["Informe premium", "Informe express", "Postpartido", "Reporte tecnico largo", "Presentacion"],
     presentationSections: [
-      "Portada",
-      "Introduccion",
-      "Resumen ejecutivo",
-      "Analisis rival",
-      "Analisis propio",
-      "Comparacion",
-      "Lideres",
+      "Idea central",
+      "30 segundos",
+      "Identidad rival",
+      "Prediccion",
+      "Amenazas",
       "Rotacion",
-      "Analisis por cuartos",
-      "Claves del partido",
-      "Conclusion final"
+      "Clave 1",
+      "Clave 2",
+      "Cuartos",
+      "Cierre"
     ],
     sourceTrace
   };
@@ -518,8 +1019,28 @@ function signalLine(signal: QualitySignal) {
   return `- ${signal.label}: ${signal.value} | ${signal.evidence}, confianza ${confidenceLabel(signal.confidence)}`;
 }
 
+function decisionLine(decision: DecisionInsight) {
+  return `- ${decision.label}: ${decision.value}. Decision: ${decision.action}. [${decision.evidence}, ${confidenceLabel(decision.confidence)}]`;
+}
+
+function barLine(label: string, value: number, max = 100) {
+  const filled = clamp(Math.round((value / max) * 12), 0, 12);
+  return `${label}: ${"#".repeat(filled)}${"-".repeat(12 - filled)} ${round(value, 0)}/${max}`;
+}
+
 function playerLine(player: PlayerScout, index: number) {
   return `${index + 1}. ${player.name} | ${player.role} | PJ ${formatNumber(player.games, 0)} | ${player.minutes} MIN/PJ | ${player.points} PTS/PJ | ${player.rebounds} REB/PJ | ${player.assists} AST/PJ | AST/PER ${player.assistTurnoverRatio ?? "s/d"} | amenaza ${player.threatIndex}`;
+}
+
+function playerProfileBlock(player: PlayerScout, index: number) {
+  return [
+    `${index + 1}. ${player.name}`,
+    `- Tipo: ${player.playerType}. Rol real: ${player.role}.`,
+    `- Fortaleza: ${player.strength}.`,
+    `- Debilidad explotable: ${player.weakness}.`,
+    `- Clave defensiva: ${player.defensiveKey}.`,
+    `- Regla de decision: ${player.decisionTrigger}.`
+  ];
 }
 
 function teamSnapshot(label: string, scout: TeamScout) {
@@ -533,6 +1054,19 @@ function teamSnapshot(label: string, scout: TeamScout) {
   ];
 }
 
+function identityBlock(label: string, identity: TeamIdentity) {
+  return [
+    `## Identidad ${label}`,
+    `- Frase staff: ${identity.summary}`,
+    `- Ritmo: ${identity.rhythm}.`,
+    `- Estilo ofensivo: ${identity.offensiveStyle}.`,
+    `- Estilo defensivo: ${identity.defensiveStyle}.`,
+    `- Dependencia de jugadores: ${identity.playerDependency}.`,
+    `- Clutch: ${identity.clutchBehavior}.`,
+    `- Lectura: ${identity.evidence}, confianza ${confidenceLabel(identity.confidence)}.`
+  ];
+}
+
 function rotationBlock(label: string, rotation: RotationScout) {
   return [
     `### ${label}`,
@@ -540,6 +1074,10 @@ function rotationBlock(label: string, rotation: RotationScout) {
     `- Primeros cambios: ${rotation.firstChanges.join(", ") || "sin muestra suficiente"}.`,
     `- Rotacion 8-9: ${rotation.coreRotation.join(", ") || "sin muestra suficiente"}.`,
     `- Cierre probable: ${rotation.closers.join(", ") || "sin muestra suficiente"}.`,
+    `- Estabilidad de quinteto: ${rotation.lineupStability}.`,
+    `- Dependencia de banca: ${rotation.benchDependency}.`,
+    `- Impacto del banco: ${rotation.benchImpact}.`,
+    `- Cierre bajo presion: ${rotation.pressureClosers}.`,
     `- Metodo: ${rotation.rule} Confianza ${confidenceLabel(rotation.confidence)}.`
   ];
 }
@@ -548,10 +1086,49 @@ function quarterBlock(model: MatchupScout) {
   const best = [...model.quarterModel].sort((a, b) => b.differential - a.differential)[0];
   const risk = [...model.quarterModel].sort((a, b) => a.differential - b.differential)[0];
   return [
-    "## Plan por cuartos",
-    ...model.quarterModel.map((quarter) => `- ${quarter.quarter}: ${quarter.pointsFor}-${quarter.pointsAgainst}, diferencial ${quarter.differential} | ${quarter.evidence}, confianza ${confidenceLabel(quarter.confidence)}.`),
+    "## Momentum por cuartos",
+    ...model.quarterModel.map((quarter) => `- ${quarter.quarter}: ${barLine("momento", quarter.differential + 12, 24)} | ${quarter.momentum}. Recomendacion: ${quarter.recommendation}.`),
     `- Ventana para atacar: ${best.quarter}. Subir calidad de tiro temprano si el partido confirma ese ritmo.`,
     `- Tramo para resistir: ${risk.quarter}. Priorizar balance, faltas y rebote defensivo.`
+  ];
+}
+
+function quickReadBlock(model: MatchupScout) {
+  return [
+    "## SI SOLO TIENES 30 SEGUNDOS",
+    ...model.decisionBrief.slice(0, 6).map(decisionLine)
+  ];
+}
+
+function tacticalKeysBlock(model: MatchupScout) {
+  return [
+    "## CLAVES DEL PARTIDO",
+    ...model.tacticalKeysCore.flatMap((key, index) => [
+      `CLAVE ${index + 1}: ${key.title}`,
+      `- Accion concreta: ${key.action}.`,
+      `- Por que: ${key.why}`,
+      `- Gatillo en vivo: ${key.trigger}.`,
+      `- Base: ${key.evidence}, confianza ${confidenceLabel(key.confidence)}.`
+    ])
+  ];
+}
+
+function predictionBlock(model: MatchupScout) {
+  return [
+    "## Prediccion del partido",
+    `- Probabilidad ${model.ownTeam.team.name}: ${model.prediction.ownWinProbability}%.`,
+    `- Probabilidad ${model.rivalTeam.team.name}: ${model.prediction.rivalWinProbability}%.`,
+    `- Rango esperado de diferencia: ${model.prediction.marginRange}.`,
+    `- Tendencia: ${model.prediction.trend}.`,
+    `- Nivel de confianza: ${confidenceLabel(model.prediction.confidence)} (${model.prediction.evidence}).`
+  ];
+}
+
+function planValidationBlock(model: MatchupScout) {
+  return [
+    "## VALIDACION DEL PLAN",
+    `- Estado: ${model.planValidation.headline}`,
+    ...model.planValidation.checks.map((check) => `- ${check.label}: proyectado ${check.projected} -> real ${check.actual} -> ${check.status}. Decision: ${check.decision}. [${check.evidence}, ${confidenceLabel(check.confidence)}]`)
   ];
 }
 
@@ -567,50 +1144,32 @@ function reliabilityBlock(model: MatchupScout) {
   ];
 }
 
-function matchupBrief(model: MatchupScout) {
-  return [
-    "## Resumen ejecutivo",
-    ...model.comparison.slice(0, 4).map(signalLine),
-    `- Amenaza principal rival: ${model.rivalPlayers[0] ? `${model.rivalPlayers[0].name}, ${model.rivalPlayers[0].points} PTS/PJ, ${model.rivalPlayers[0].rebounds} REB/PJ, amenaza ${model.rivalPlayers[0].threatIndex}` : "sin muestra suficiente"}.`,
-    `- Ventaja propia primaria: ${model.ownPlayers[0] ? `${model.ownPlayers[0].name}, ${model.ownPlayers[0].points} PTS/PJ, impacto ${model.ownPlayers[0].recentImpactIndex}` : "sin muestra suficiente"}.`
-  ];
-}
-
-function planBlock(model: MatchupScout) {
-  const rivalThreat = model.rivalPlayers[0];
-  const ownAdvantage = model.ownPlayers[0];
-  return [
-    "## Plan de partido",
-    `- Prioridad defensiva: ${rivalThreat ? `negar comodidad inicial a ${rivalThreat.name}; forzar tiros de baja eficiencia y reducir asistencias tempranas.` : "validar amenaza rival con video antes de cerrar plan."}`,
-    `- Prioridad ofensiva: ${ownAdvantage ? `abrir el partido involucrando a ${ownAdvantage.name} para fijar ayudas y castigar ventajas.` : "construir tiros desde spacing y cortes, sin acelerar perdidas."}`,
-    "- Control de posesion: asegurar primer rebote defensivo antes de correr; si el rival carga tablero, cerrar con 5 jugadores.",
-    "- Disciplina: evitar bonus temprano en el cuarto de mayor riesgo y cambiar cobertura antes de conceder racha de 6 puntos.",
-    "- Banco: preparar los dos primeros cambios segun la rotacion inferida y mirar si el rival baja tamano o manejo."
-  ];
-}
-
 function buildPregameReport(model: MatchupScout) {
   return [
     "# Informe prepartido premium",
     `${model.ownTeam.team.name} vs ${model.rivalTeam.team.name}`,
     `Generado: ${new Date().toLocaleString("es-CL")}`,
     "",
-    ...matchupBrief(model),
+    ...quickReadBlock(model),
+    "",
+    ...predictionBlock(model),
     "",
     "## Snapshot competitivo",
     ...teamSnapshot("Equipo propio", model.ownTeam),
     "",
     ...teamSnapshot("Rival", model.rivalTeam),
     "",
-    "## Jugadores a controlar",
-    ...model.rivalPlayers.slice(0, 8).map(playerLine),
+    ...identityBlock("del rival", model.rivalIdentity),
+    "",
+    "## Perfil de jugadores rivales",
+    ...model.rivalPlayers.slice(0, 6).flatMap(playerProfileBlock),
     "",
     "## Ventajas propias disponibles",
     ...model.ownPlayers.slice(0, 6).map(playerLine),
     "",
     ...rotationBlock("Rotacion rival probable", model.rivalRotation),
     "",
-    ...planBlock(model),
+    ...tacticalKeysBlock(model),
     "",
     ...quarterBlock(model),
     "",
@@ -629,20 +1188,24 @@ function buildTechnicalReport(model: MatchupScout) {
     `${model.ownTeam.team.name} vs ${model.rivalTeam.team.name}`,
     `Generado: ${new Date().toLocaleString("es-CL")}`,
     "",
-    ...matchupBrief(model),
+    ...quickReadBlock(model),
+    "",
+    ...predictionBlock(model),
     "",
     "## Diagnostico propio",
     ...teamSnapshot("Equipo propio", model.ownTeam),
+    ...identityBlock("propia", model.ownIdentity),
     ...model.ownTeam.strengths.map(signalLine),
     ...model.ownTeam.weaknesses.map(signalLine),
     "",
     "## Diagnostico rival",
     ...teamSnapshot("Rival", model.rivalTeam),
+    ...identityBlock("del rival", model.rivalIdentity),
     ...model.rivalTeam.strengths.map(signalLine),
     ...model.rivalTeam.weaknesses.map(signalLine),
     "",
-    "## Lideres rivales por amenaza",
-    ...model.rivalPlayers.slice(0, 10).map(playerLine),
+    "## Perfiles rivales por amenaza",
+    ...model.rivalPlayers.slice(0, 10).flatMap(playerProfileBlock),
     "",
     "## Lideres propios por impacto",
     ...model.ownPlayers.slice(0, 10).map(playerLine),
@@ -651,7 +1214,7 @@ function buildTechnicalReport(model: MatchupScout) {
     "",
     ...rotationBlock("Rotacion rival probable", model.rivalRotation),
     "",
-    ...planBlock(model),
+    ...tacticalKeysBlock(model),
     "",
     ...quarterBlock(model),
     "",
@@ -676,9 +1239,13 @@ function buildPostgameReport(model: MatchupScout) {
     `${model.ownTeam.team.name} vs ${model.rivalTeam.team.name}`,
     `Generado: ${new Date().toLocaleString("es-CL")}`,
     "",
+    ...quickReadBlock(model),
+    "",
+    ...planValidationBlock(model),
+    "",
     "## Lectura postpartido",
     "- Este informe usa la base cargada para ordenar aprendizajes y validar el plan. Si el boxscore del partido ya fue importado, las lineas de jugador y equipo se actualizan con datos confirmados.",
-    ...model.tacticalKeys.map(signalLine),
+    ...model.tacticalKeysCore.map((key) => `- ${key.title}: ${key.action}. ${key.why}`),
     "",
     "## Control de objetivos",
     "- Objetivo 1: comparar puntos permitidos contra el promedio rival y el diferencial esperado.",
@@ -706,13 +1273,17 @@ function buildPostgameReport(model: MatchupScout) {
 
 function buildExecutiveSummary(model: MatchupScout) {
   return [
-    "# Resumen ejecutivo",
+    "# Informe express",
     `${model.ownTeam.team.name} vs ${model.rivalTeam.team.name}`,
     "",
-    "## Mensaje central",
-    ...model.comparison.slice(0, 4).map(signalLine),
+    ...quickReadBlock(model),
     "",
-    "## Tres focos para jugadores",
+    ...predictionBlock(model),
+    "",
+    "## Modo jugador",
+    ...model.playerModeBrief.map((item) => `- ${item}.`),
+    "",
+    "## Tres focos en cancha",
     `- Controlar a ${model.rivalPlayers[0]?.name ?? "la principal amenaza rival"} sin regalar faltas tempranas.`,
     "- Cerrar rebote defensivo antes de correr.",
     `- Atacar el ${[...model.quarterModel].sort((a, b) => b.differential - a.differential)[0].quarter} con decision y tiro de alta calidad.`,
@@ -728,40 +1299,51 @@ function buildExecutiveSummary(model: MatchupScout) {
 }
 
 function buildPresentation(model: MatchupScout) {
-  const rivalThreats = model.rivalPlayers.slice(0, 4).map((player) => `- ${player.name}: ${player.points} PTS/PJ, ${player.rebounds} REB/PJ, amenaza ${player.threatIndex}`);
+  const topDecision = model.decisionBrief[0];
+  const rivalThreats = model.rivalPlayers.slice(0, 3).map((player) => `- ${player.name}: ${player.playerType}; ${player.defensiveKey}`);
   return [
-    "# Slide 01 | Portada",
+    "# Slide 01 | Idea central",
     `${model.ownTeam.team.name} vs ${model.rivalTeam.team.name}`,
+    topDecision ? `- ${topDecision.label}: ${topDecision.value}.` : "- Partido de margen fino.",
     "",
-    "# Slide 02 | Resumen ejecutivo",
-    ...model.comparison.slice(0, 3).map(signalLine),
+    "# Slide 02 | 30 segundos",
+    ...model.decisionBrief.slice(0, 3).map((decision) => `- ${decision.label}: ${decision.action}`),
     "",
     "# Slide 03 | Identidad rival",
-    ...teamSnapshot("Rival", model.rivalTeam),
+    `- ${model.rivalIdentity.summary}`,
+    `- ${model.rivalIdentity.defensiveStyle}`,
+    `- ${model.rivalIdentity.clutchBehavior}`,
     "",
-    "# Slide 04 | Nuestra ventaja",
-    ...teamSnapshot("Equipo propio", model.ownTeam),
+    "# Slide 04 | Prediccion",
+    `- ${model.prediction.ownWinProbability}% victoria propia.`,
+    `- Margen esperado: ${model.prediction.marginRange}.`,
+    `- ${model.prediction.trend}.`,
     "",
     "# Slide 05 | Amenazas rivales",
     ...rivalThreats,
     "",
     "# Slide 06 | Rotacion rival",
-    ...rotationBlock("Rotacion probable", model.rivalRotation),
+    `- Titulares: ${model.rivalRotation.starters.join(", ") || "sin muestra"}.`,
+    `- Cierre: ${model.rivalRotation.pressureClosers}.`,
+    `- Banco: ${model.rivalRotation.benchImpact}.`,
     "",
-    "# Slide 07 | Plan defensivo",
-    ...planBlock(model).slice(1, 4),
+    "# Slide 07 | Clave 1",
+    `- ${model.tacticalKeysCore[0]?.action ?? "negar primera ventaja"}.`,
+    `- ${model.tacticalKeysCore[0]?.why ?? "evitar ritmo rival"}.`,
+    `- Gatillo: ${model.tacticalKeysCore[0]?.trigger ?? "cambiar cobertura si hay racha"}.`,
     "",
-    "# Slide 08 | Plan ofensivo",
-    ...planBlock(model).slice(4),
+    "# Slide 08 | Clave 2",
+    `- ${model.tacticalKeysCore[1]?.action ?? "atacar nuestra ventaja"}.`,
+    `- ${model.tacticalKeysCore[1]?.why ?? "crear tiros de alta calidad"}.`,
+    `- Gatillo: ${model.tacticalKeysCore[1]?.trigger ?? "buscar matchup debil"}.`,
     "",
     "# Slide 09 | Cuartos",
-    ...quarterBlock(model).slice(1),
+    ...model.quarterModel.map((quarter) => `- ${quarter.quarter}: ${quarter.momentum}; ${quarter.recommendation}`),
     "",
-    "# Slide 10 | Claves finales",
-    "- Cuidar el balon.",
-    "- Ganar el rebote del cuarto critico.",
-    "- Llegar al cierre con matchups definidos.",
-    "- Ajustar desde evidencia: dato confirmado, inferencia y conclusion tactica."
+    "# Slide 10 | Cierre",
+    "- Cuidar el balon y el primer rebote.",
+    "- Ejecutar gatillos sin esperar timeout.",
+    "- Validar el plan con boxscore postpartido."
   ].join("\n");
 }
 

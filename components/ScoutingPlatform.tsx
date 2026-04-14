@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Area,
@@ -86,6 +87,23 @@ function evidenceClass(evidence: EvidenceLevel) {
   return "tactical";
 }
 
+function teamThemeFor(name: string): CSSProperties {
+  const palettes = [
+    ["#0f766e", "#dff7f1"],
+    ["#b91c1c", "#fff1f2"],
+    ["#2563eb", "#eff6ff"],
+    ["#7c2d12", "#fff7ed"],
+    ["#365314", "#f7fee7"],
+    ["#4f46e5", "#eef2ff"]
+  ] as const;
+  const index = name.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) % palettes.length;
+  const [primary, soft] = palettes[index];
+  return {
+    "--team-primary": primary,
+    "--team-soft": soft
+  } as CSSProperties;
+}
+
 function EvidencePill({ evidence, confidence }: { evidence: EvidenceLevel; confidence?: number }) {
   return (
     <span className={`evidence-pill ${evidenceClass(evidence)}`}>
@@ -101,6 +119,82 @@ function MetricTile({ label, value, caption }: { label: string; value: string; c
       <span>{label}</span>
       <strong>{value}</strong>
       <small>{caption}</small>
+    </article>
+  );
+}
+
+function formatRotationName(name: string) {
+  const cleaned = name.replace(/\s+/g, " ").trim();
+  if (!cleaned.includes(",")) {
+    return cleaned;
+  }
+
+  const [surname, ...givenParts] = cleaned.split(",");
+  const givenName = givenParts.join(" ").trim();
+  return givenName ? `${givenName} ${surname.trim()}` : surname.trim();
+}
+
+function PlayerChipList({ players, featured = false }: { players: string[]; featured?: boolean }) {
+  if (!players.length) {
+    return <span className="empty-chip">Sin muestra suficiente</span>;
+  }
+
+  return (
+    <div className="player-chip-list">
+      {players.map((player, index) => (
+        <span className={`player-chip ${featured ? "featured" : ""}`} key={`${player}-${index}`}>
+          {formatRotationName(player)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RotationBlock({
+  title,
+  tag,
+  players,
+  caption,
+  featured = false
+}: {
+  title: string;
+  tag: string;
+  players: string[];
+  caption: string;
+  featured?: boolean;
+}) {
+  return (
+    <article className={`rotation-card ${featured ? "featured" : ""}`}>
+      <header>
+        <div>
+          <span>{tag}</span>
+          <h4>{title}</h4>
+        </div>
+        <strong>{players.length ? `${players.length} jug.` : "s/d"}</strong>
+      </header>
+      <PlayerChipList players={players} featured={featured} />
+      <p>{caption}</p>
+    </article>
+  );
+}
+
+function RotationSignal({ label, value, caption }: { label: string; value: string; caption: string }) {
+  return (
+    <article className="rotation-signal">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{caption}</small>
+    </article>
+  );
+}
+
+function DecisionCard({ decision }: { decision: MatchupScout["decisionBrief"][number] }) {
+  return (
+    <article className={`decision-card ${decision.tone}`}>
+      <span>{decision.label}</span>
+      <strong>{decision.value}</strong>
+      <p>{decision.action}</p>
+      <EvidencePill evidence={decision.evidence} confidence={decision.confidence} />
     </article>
   );
 }
@@ -530,7 +624,7 @@ export function ScoutingPlatform() {
   const rivalTop = model.rivalPlayers[0]?.name ?? "Sin muestra";
 
   return (
-    <main className="premium-shell">
+    <main className="premium-shell" style={teamThemeFor(model.ownTeam.team.name)}>
       <section className="premium-hero">
         <div className="hero-main">
           <p className="eyebrow">Liga DOS Chile · Scouting privado</p>
@@ -611,6 +705,59 @@ export function ScoutingPlatform() {
 
       {tab === "Dashboard" ? (
         <section className="module-grid">
+          <section className="module-panel decision-room">
+            <div className="module-heading">
+              <div>
+                <p className="eyebrow">Capa 1 · lectura rapida</p>
+                <h3>Si solo tienes 30 segundos</h3>
+              </div>
+              <EvidencePill evidence={model.prediction.evidence} confidence={model.prediction.confidence} />
+            </div>
+            <div className="decision-grid">
+              {model.decisionBrief.slice(0, isPlayerView ? 4 : 6).map((decision) => (
+                <DecisionCard decision={decision} key={decision.label} />
+              ))}
+            </div>
+          </section>
+          <section className="module-panel identity-panel">
+            <div className="module-heading">
+              <p className="eyebrow">Identidad rival</p>
+              <h3>{model.rivalIdentity.summary}</h3>
+            </div>
+            <div className="identity-grid">
+              <MetricTile label="Ritmo" value={model.rivalIdentity.rhythm} caption={model.rivalIdentity.offensiveStyle} />
+              <MetricTile label="Defensa" value={model.rivalIdentity.defensiveStyle} caption={model.rivalIdentity.clutchBehavior} />
+              <MetricTile label="Dependencia" value={model.rivalIdentity.playerDependency} caption="Lectura de carga ofensiva" />
+              <MetricTile label="Prediccion" value={`${model.prediction.ownWinProbability}%`} caption={`${model.prediction.trend} · margen ${model.prediction.marginRange}`} />
+            </div>
+          </section>
+          <section className="module-panel core-keys">
+            <div className="module-heading">
+              <p className="eyebrow">Motor de decisiones</p>
+              <h3>Claves del partido</h3>
+            </div>
+            <div className="key-list">
+              {model.tacticalKeysCore.slice(0, isPlayerView ? 3 : 4).map((key) => (
+                <article key={key.title}>
+                  <strong>{key.title}</strong>
+                  <p>{key.action}</p>
+                  <small>{key.why} · Gatillo: {key.trigger}</small>
+                  <EvidencePill evidence={key.evidence} confidence={key.confidence} />
+                </article>
+              ))}
+            </div>
+          </section>
+          {isPlayerView ? (
+            <section className="module-panel player-mode-panel">
+              <div className="module-heading">
+                <p className="eyebrow">Modo jugador</p>
+                <h3>Lo que hay que saber</h3>
+              </div>
+              <div className="player-brief-list">
+                {model.playerModeBrief.map((item) => <p key={item}>{item}</p>)}
+              </div>
+            </section>
+          ) : null}
           <MetricTile label="Equipo propio" value={model.ownTeam.recentRecord} caption={`${model.ownTeam.team.gamesPlayed} PJ tabla · muestra ${model.ownTeam.sampleRecord}`} />
           <MetricTile label="Rival" value={model.rivalTeam.recentRecord} caption={`${model.rivalTeam.team.gamesPlayed} PJ tabla · muestra ${model.rivalTeam.sampleRecord}`} />
           <MetricTile label="Amenaza rival" value={rivalTop} caption="Indice combinado de puntos, tablero, asistencias y minutos" />
@@ -762,6 +909,10 @@ export function ScoutingPlatform() {
                 <tr>
                   <th>Jugador</th>
                   <th>Rol estimado</th>
+                  <th>Tipo</th>
+                  <th>Fortaleza</th>
+                  <th>Debilidad</th>
+                  <th>Clave defensiva</th>
                   <th>PJ</th>
                   <th>MIN/PJ</th>
                   <th>PTS/PJ</th>
@@ -779,6 +930,10 @@ export function ScoutingPlatform() {
                   <tr key={player.name}>
                     <td>{player.name}</td>
                     <td>{player.role}</td>
+                    <td>{player.playerType}</td>
+                    <td>{player.strength}</td>
+                    <td>{player.weakness}</td>
+                    <td>{player.defensiveKey}</td>
                     <td>{player.games}</td>
                     <td>{player.minutes}</td>
                     <td>{player.points}</td>
@@ -805,15 +960,46 @@ export function ScoutingPlatform() {
           ].map(({ label, rotation }) => (
             <section className="module-panel" key={label}>
               <div className="module-heading">
-                <p className="eyebrow">Rotacion {label}</p>
-                <h3>Regla de ultimos registros</h3>
+                <div>
+                  <p className="eyebrow">Rotacion {label}</p>
+                  <h3>{label === "Propia" ? "Mapa de rotacion propia" : "Lectura de rotacion rival"}</h3>
+                  <p className="heading-copy">Ultimos registros, minutos, consistencia de aparicion e impacto reciente.</p>
+                </div>
                 <EvidencePill evidence={rotation.evidence} confidence={rotation.confidence} />
               </div>
-              <div className="rotation-grid">
-                <MetricTile label="Quinteto inicial probable" value={rotation.starters.join(", ") || "Sin muestra"} caption={rotation.rule} />
-                <MetricTile label="Primeros dos cambios" value={rotation.firstChanges.join(", ") || "Sin muestra"} caption="Minutos y aparicion recurrente" />
-                <MetricTile label="Rotacion 8-9" value={rotation.coreRotation.join(", ") || "Sin muestra"} caption="Nucleo de partido" />
-                <MetricTile label="Cierre probable" value={rotation.closers.join(", ") || "Sin muestra"} caption="Indice de impacto reciente" />
+              <div className="rotation-layout">
+                <RotationBlock
+                  title="Quinteto inicial probable"
+                  tag="Inicio"
+                  players={rotation.starters}
+                  caption={rotation.rule}
+                  featured
+                />
+                <div className="rotation-pair">
+                  <RotationBlock
+                    title="Primeros cambios"
+                    tag="Banco inmediato"
+                    players={rotation.firstChanges}
+                    caption="Minutos y aparicion recurrente."
+                  />
+                  <RotationBlock
+                    title="Cierre bajo presion"
+                    tag="Clutch"
+                    players={rotation.closers}
+                    caption="Indice de impacto reciente y uso en tramo final."
+                  />
+                </div>
+                <RotationBlock
+                  title="Rotacion principal"
+                  tag="8-9 jugadores"
+                  players={rotation.coreRotation}
+                  caption="Nucleo estable para preparar cargas, emparejamientos y ventanas de descanso."
+                />
+                <div className="rotation-signal-grid">
+                  <RotationSignal label="Estabilidad" value={rotation.lineupStability} caption="Separacion entre top 5 y banca." />
+                  <RotationSignal label="Banco" value={rotation.benchDependency} caption={rotation.benchImpact} />
+                  <RotationSignal label="Presion" value={rotation.pressureClosers} caption="Quienes realmente deberian cerrar." />
+                </div>
               </div>
             </section>
           ))}
@@ -837,11 +1023,59 @@ export function ScoutingPlatform() {
               <Bar dataKey="Diferencial" fill="#eab308" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+          <div className="quarter-decision-grid">
+            {model.quarterModel.map((quarter) => (
+              <article key={quarter.quarter}>
+                <strong>{quarter.quarter} · {quarter.momentum}</strong>
+                <p>{quarter.recommendation}</p>
+                <small>Diferencial proyectado {quarter.differential}</small>
+              </article>
+            ))}
+          </div>
           <SignalList title="Lectura por cuarto" signals={model.tacticalKeys.slice(-2)} />
         </section>
       ) : null}
 
-      {tab === "Comparativo" ? <SignalList title="Rival vs propio equipo" signals={model.comparison} /> : null}
+      {tab === "Comparativo" ? (
+        <section className="two-column">
+          <SignalList title="Rival vs propio equipo" signals={model.comparison} />
+          <section className="module-panel">
+            <div className="module-heading">
+              <p className="eyebrow">Prediccion</p>
+              <h3>{model.prediction.ownWinProbability}% victoria propia</h3>
+            </div>
+            <div className="prediction-bars">
+              <div>
+                <span>{model.ownTeam.team.name}</span>
+                <strong>{model.prediction.ownWinProbability}%</strong>
+                <i style={{ width: `${model.prediction.ownWinProbability}%` }} />
+              </div>
+              <div>
+                <span>{model.rivalTeam.team.name}</span>
+                <strong>{model.prediction.rivalWinProbability}%</strong>
+                <i style={{ width: `${model.prediction.rivalWinProbability}%` }} />
+              </div>
+            </div>
+            <p className="status-copy">Margen esperado {model.prediction.marginRange}. {model.prediction.trend}</p>
+          </section>
+          <section className="module-panel">
+            <div className="module-heading">
+              <p className="eyebrow">Validacion postpartido</p>
+              <h3>{model.planValidation.headline}</h3>
+            </div>
+            <div className="validation-list">
+              {model.planValidation.checks.map((check) => (
+                <article className={check.status} key={check.label}>
+                  <strong>{check.label}</strong>
+                  <p>{check.projected} → {check.actual}</p>
+                  <small>{check.decision}</small>
+                  <EvidencePill evidence={check.evidence} confidence={check.confidence} />
+                </article>
+              ))}
+            </div>
+          </section>
+        </section>
+      ) : null}
 
       {tab === "Informes" ? (
         <section className="module-panel">
@@ -874,8 +1108,8 @@ export function ScoutingPlatform() {
               },
               {
                 kind: "resumen" as const,
-                filename: "resumen-ejecutivo-liga-dos.pdf",
-                title: "Resumen ejecutivo",
+                filename: "informe-express-liga-dos.pdf",
+                title: "Informe express",
                 description: "Version corta para jugadores y staff, enfocada en 3-4 claves accionables.",
                 staffOnly: false
               }

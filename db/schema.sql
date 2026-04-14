@@ -29,6 +29,8 @@ create table teams (
   primary_color text,
   secondary_color text,
   logo_url text,
+  team_identity text,
+  clutch_behavior text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (competition, name)
@@ -41,6 +43,9 @@ create table players (
   name text not null,
   position text,
   jersey_number text,
+  player_role text,
+  player_type text,
+  player_weakness text,
   status text not null default 'active',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -157,9 +162,11 @@ create table reports (
   own_team_id uuid not null references teams(id),
   rival_team_id uuid not null references teams(id),
   game_id uuid references games(id),
-  report_type text not null check (report_type in ('prepartido', 'postpartido', 'tecnico_largo', 'resumen_ejecutivo')),
+  report_type text not null check (report_type in ('prepartido', 'postpartido', 'tecnico_largo', 'resumen_ejecutivo', 'informe_express', 'informe_premium')),
   format text not null default 'markdown',
   content text not null,
+  predicted_outcome jsonb,
+  plan_validation jsonb,
   file_url text,
   created_at timestamptz not null default now()
 );
