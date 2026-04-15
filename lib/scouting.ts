@@ -136,10 +136,19 @@ export type QuarterScout = {
   confidence: number;
 };
 
+export type RecentGameScout = {
+  result: "G" | "P";
+  score: string;
+  opponent: string;
+  venue: "Local" | "Visita";
+  date: string;
+};
+
 export type TeamScout = {
   team: TeamRow;
   recentRecord: string;
   sampleRecord: string;
+  recentGames: RecentGameScout[];
   localitySplit: string;
   offenseTrend: string;
   defenseTrend: string;
@@ -283,6 +292,20 @@ function getFilteredTeamForm(games: GameRow[], teamName: string, filters: Scouti
     averageFor,
     averageAgainst,
     games: recentGames
+  };
+}
+
+function buildRecentGameScout(game: GameRow, teamName: string): RecentGameScout {
+  const isHome = areSameTeam(game.homeTeam, teamName);
+  const teamScore = parseNumber(isHome ? game.homeScore : game.awayScore);
+  const opponentScore = parseNumber(isHome ? game.awayScore : game.homeScore);
+
+  return {
+    result: teamScore > opponentScore ? "G" : "P",
+    score: `${Math.round(teamScore)}-${Math.round(opponentScore)}`,
+    opponent: isHome ? game.awayTeam : game.homeTeam,
+    venue: isHome ? "Local" : "Visita",
+    date: game.date
   };
 }
 
@@ -430,6 +453,7 @@ function buildTeamScout(team: TeamRow, games: GameRow[], filters: ScoutingFilter
     team,
     recentRecord: `${team.wins}-${team.losses}`,
     sampleRecord: recent.length > 0 ? form.record : "sin muestra",
+    recentGames: recent.map((game) => buildRecentGameScout(game, team.name)),
     localitySplit: `${team.gamesPlayed} PJ tabla | muestra ${form.record}: ${homeGames} local / ${awayGames} visita`,
     offenseTrend:
       form.averageFor >= 82

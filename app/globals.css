@@ -1372,6 +1372,201 @@ input {
   color: #151916;
 }
 
+.record-card {
+  display: grid;
+  align-self: start;
+  gap: 7px;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid rgba(22, 31, 27, 0.11);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(20, 31, 27, 0.08);
+}
+
+.record-card > span,
+.record-card > small {
+  color: #64716b;
+}
+
+.record-card > span {
+  font-weight: 760;
+}
+
+.record-card > strong {
+  color: #151916;
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.record-card > small {
+  font-weight: 720;
+}
+
+.recent-games {
+  display: grid;
+  gap: 7px;
+  margin-top: 7px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(22, 31, 27, 0.08);
+}
+
+.recent-games > b {
+  color: #33413a;
+  font-size: 0.86rem;
+}
+
+.recent-game-row {
+  display: grid;
+  grid-template-columns: 26px 58px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: #202722;
+}
+
+.result-badge {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 6px;
+  font-style: normal;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.result-badge.win {
+  color: #0f766e;
+  background: #dff7f1;
+}
+
+.result-badge.loss {
+  color: #be123c;
+  background: #fff1f2;
+}
+
+.recent-game-row strong {
+  color: #151916;
+  font-size: 0.92rem;
+}
+
+.recent-game-row em {
+  min-width: 0;
+  overflow: hidden;
+  color: #33413a;
+  font-style: normal;
+  font-weight: 740;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-game-row small,
+.empty-recent-games {
+  color: #64716b;
+  font-size: 0.82rem;
+}
+
+.empty-recent-games {
+  margin: 0;
+}
+
+.player-impact-card {
+  display: grid;
+  align-self: start;
+  gap: 10px;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid rgba(22, 31, 27, 0.11);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(20, 31, 27, 0.08);
+}
+
+.player-impact-card.threat {
+  border-color: rgba(190, 18, 60, 0.18);
+}
+
+.player-impact-card.advantage {
+  border-color: color-mix(in srgb, var(--team-primary, #0f766e) 24%, rgba(22, 31, 27, 0.1));
+}
+
+.player-impact-card > span,
+.impact-reason {
+  color: #64716b;
+}
+
+.player-impact-card > span {
+  font-weight: 760;
+}
+
+.player-impact-card h4 {
+  margin: 0;
+  color: #151916;
+  font-size: 1.38rem;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+.player-role-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.player-role-strip span {
+  border: 1px solid rgba(22, 31, 27, 0.1);
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: #33413a;
+  background: #f8fbf9;
+  font-size: 0.78rem;
+  font-weight: 780;
+}
+
+.player-impact-card p {
+  margin: 0;
+  color: #33413a;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.player-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.player-stat-grid div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid rgba(22, 31, 27, 0.09);
+  border-radius: 8px;
+  padding: 8px;
+  background: #fbfdfc;
+}
+
+.player-stat-grid small {
+  color: #64716b;
+  font-size: 0.72rem;
+  font-weight: 780;
+}
+
+.player-stat-grid strong {
+  color: #151916;
+  font-size: 0.98rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.impact-reason {
+  border-top: 1px solid rgba(22, 31, 27, 0.08);
+  padding-top: 9px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 .signal-row {
   padding: 10px 0;
   border-bottom-color: rgba(22, 31, 27, 0.09);
@@ -1439,6 +1634,8 @@ input {
 
 .download-tile:hover,
 .presentation-map article:hover,
+.record-card:hover,
+.player-impact-card:hover,
 .metric-tile:hover {
   border-color: rgba(15, 118, 110, 0.3);
   box-shadow: 0 18px 34px rgba(15, 118, 110, 0.1);

@@ -123,6 +123,91 @@ function MetricTile({ label, value, caption }: { label: string; value: string; c
   );
 }
 
+function TeamRecordCard({
+  label,
+  scout,
+  sampleSize
+}: {
+  label: string;
+  scout: MatchupScout["ownTeam"];
+  sampleSize: number;
+}) {
+  return (
+    <article className="record-card">
+      <span>{label}</span>
+      <strong>{scout.recentRecord}</strong>
+      <small>{scout.team.gamesPlayed} PJ tabla · muestra {scout.sampleRecord}</small>
+      <div className="recent-games">
+        <b>Ultimos {sampleSize} partidos</b>
+        {scout.recentGames.length > 0 ? (
+          scout.recentGames.map((game) => (
+            <div className="recent-game-row" key={`${scout.team.teamId}-${game.date}-${game.opponent}`}>
+              <i className={`result-badge ${game.result === "G" ? "win" : "loss"}`}>{game.result}</i>
+              <strong>{game.score}</strong>
+              <em>{game.venue === "Local" ? "vs" : "@"} {game.opponent}</em>
+              <small>{game.venue}</small>
+            </div>
+          ))
+        ) : (
+          <p className="empty-recent-games">Sin partidos confirmados para este filtro.</p>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function PlayerImpactCard({
+  label,
+  player,
+  tone
+}: {
+  label: string;
+  player?: MatchupScout["ownPlayers"][number];
+  tone: "threat" | "advantage";
+}) {
+  if (!player) {
+    return (
+      <article className={`player-impact-card ${tone}`}>
+        <span>{label}</span>
+        <h4>Sin muestra individual</h4>
+        <p>Faltan estadisticas oficiales suficientes para priorizar un jugador.</p>
+      </article>
+    );
+  }
+
+  const stats = [
+    ["PTS/PJ", player.points],
+    ["REB/PJ", player.rebounds],
+    ["AST/PJ", player.assists],
+    ["MIN/PJ", player.minutes],
+    ["EF tiro", player.shootingEfficiency ?? "s/d"],
+    ["Impacto", player.recentImpactIndex]
+  ];
+
+  return (
+    <article className={`player-impact-card ${tone}`}>
+      <span>{label}</span>
+      <h4>{player.name}</h4>
+      <div className="player-role-strip">
+        <span>{player.role}</span>
+        <span>{player.playerType}</span>
+      </div>
+      <p>{tone === "threat" ? player.defensiveKey : player.decisionTrigger}</p>
+      <div className="player-stat-grid">
+        {stats.map(([statLabel, statValue]) => (
+          <div key={statLabel}>
+            <small>{statLabel}</small>
+            <strong>{statValue}</strong>
+          </div>
+        ))}
+      </div>
+      <small className="impact-reason">
+        {player.strength} · amenaza {player.threatIndex}
+      </small>
+    </article>
+  );
+}
+
 function formatRotationName(name: string) {
   const cleaned = name.replace(/\s+/g, " ").trim();
   if (!cleaned.includes(",")) {
@@ -620,8 +705,8 @@ export function ScoutingPlatform() {
   const uploadedGames = competitionGames.filter((game) => isUploadedGame(game.gameId, game.notes));
   const pendingGames = competitionGames.filter((game) => !isUploadedGame(game.gameId, game.notes));
   const playerRows = isPlayerView ? model.rivalPlayers.slice(0, 4) : model.rivalPlayers.slice(0, 10);
-  const ownTop = model.ownPlayers[0]?.name ?? "Sin muestra";
-  const rivalTop = model.rivalPlayers[0]?.name ?? "Sin muestra";
+  const ownLead = model.ownPlayers[0];
+  const rivalThreat = model.rivalPlayers[0];
 
   return (
     <main className="premium-shell" style={teamThemeFor(model.ownTeam.team.name)}>
@@ -758,10 +843,10 @@ export function ScoutingPlatform() {
               </div>
             </section>
           ) : null}
-          <MetricTile label="Equipo propio" value={model.ownTeam.recentRecord} caption={`${model.ownTeam.team.gamesPlayed} PJ tabla · muestra ${model.ownTeam.sampleRecord}`} />
-          <MetricTile label="Rival" value={model.rivalTeam.recentRecord} caption={`${model.rivalTeam.team.gamesPlayed} PJ tabla · muestra ${model.rivalTeam.sampleRecord}`} />
-          <MetricTile label="Amenaza rival" value={rivalTop} caption="Indice combinado de puntos, tablero, asistencias y minutos" />
-          <MetricTile label="Ventaja propia" value={ownTop} caption="Prioridad para cargar el plan ofensivo" />
+          <TeamRecordCard label="Equipo propio" scout={model.ownTeam} sampleSize={scoutingFilters.sampleSize} />
+          <TeamRecordCard label="Rival" scout={model.rivalTeam} sampleSize={scoutingFilters.sampleSize} />
+          <PlayerImpactCard label="Amenaza rival" player={rivalThreat} tone="threat" />
+          <PlayerImpactCard label="Ventaja propia" player={ownLead} tone="advantage" />
           <section className="module-panel standings-panel">
             <div className="module-heading">
               <p className="eyebrow">Tabla Liga DOS · {selectedZone}</p>
