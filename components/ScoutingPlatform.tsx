@@ -33,7 +33,6 @@ const TRACE_KEY = "dos-premium-source-trace-v1";
 const tabs = [
   "Dashboard",
   "Equipos",
-  "Carga",
   "Jugadores",
   "Rotacion",
   "Cuartos",
@@ -41,6 +40,7 @@ const tabs = [
   "Informes",
   "Presentaciones",
   "Notas",
+  "Carga",
   "Admin"
 ] as const;
 
