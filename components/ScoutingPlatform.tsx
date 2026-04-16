@@ -5,15 +5,24 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis
 } from "recharts";
-import { applyBoxscoreImports, areSameTeam, getPointDifferential, LIGA_DOS_COMPETITION, parseNumber, seedData } from "@/lib/data";
+import {
+  applyBoxscoreImports,
+  areSameTeam,
+  getAssistsPerGame,
+  getPointDifferential,
+  getPointsAgainstPerGame,
+  getPointsForPerGame,
+  getReboundsPerGame,
+  LIGA_DOS_COMPETITION,
+  parseNumber,
+  seedData
+} from "@/lib/data";
 import { BoxscoreImport, CompetitionKey, DatasetMap, GameRow, PlayerGameStatRow, PlayerRow, ShotRow, TeamRow } from "@/lib/types";
 import {
   buildEditableReport,
@@ -229,7 +238,8 @@ function PlayerChipList({ players, featured = false }: { players: string[]; feat
     <div className="player-chip-list">
       {players.map((player, index) => (
         <span className={`player-chip ${featured ? "featured" : ""}`} key={`${player}-${index}`}>
-          {formatRotationName(player)}
+          <b>{index + 1}</b>
+          <i>{formatRotationName(player)}</i>
         </span>
       ))}
     </div>
@@ -287,7 +297,7 @@ function DecisionCard({ decision }: { decision: MatchupScout["decisionBrief"][nu
 
 function SignalList({ title, signals }: { title: string; signals: MatchupScout["tacticalKeys"] }) {
   return (
-    <section className="module-panel">
+    <section className="module-panel signal-panel">
       <div className="module-heading">
         <p className="eyebrow">Lectura tecnica</p>
         <h3>{title}</h3>
@@ -669,6 +679,59 @@ function signedDelta(value: number, suffix = "") {
   return `${sign}${roundOne(value)}${suffix}`;
 }
 
+function buildQuarterPlan(
+  quarter: MatchupScout["quarterModel"][number],
+  attackQuarter?: string,
+  riskQuarter?: string
+) {
+  const baseByQuarter: Record<string, { phase: string; objective: string; risk: string; decision: string; trigger: string }> = {
+    "1C": {
+      phase: "Inicio de control",
+      objective: "Entrar con balance defensivo y tiro de alta calidad.",
+      risk: "Regalar transicion o entrar temprano en bonus.",
+      decision: "Cargar la primera ventaja sin acelerar de mas.",
+      trigger: "Si el rival corre 2 posesiones seguidas, bajar ritmo y cerrar rebote."
+    },
+    "2C": {
+      phase: "Banco y ajuste",
+      objective: "Sostener margen mientras entra la segunda unidad.",
+      risk: "Caida ofensiva por baja creacion o perdidas.",
+      decision: "Usar segundo generador y mantener una referencia anotadora.",
+      trigger: "Si el ataque queda dos posesiones sin ventaja, volver a base titular."
+    },
+    "3C": {
+      phase: "Cuarto de quiebre",
+      objective: "Subir agresividad despues del descanso.",
+      risk: "Perder foco ante presion o cambios defensivos.",
+      decision: "Atacar temprano antes de que el rival estabilice ayudas.",
+      trigger: "Si aparece parcial positivo, extender defensa y correr tras rebote."
+    },
+    "4C": {
+      phase: "Cierre",
+      objective: "Controlar posesiones, faltas y seleccion de tiro.",
+      risk: "Malos tiros tempranos o faltas que regalen libres.",
+      decision: "Jugar con ventaja, reloj y emparejamientos claros.",
+      trigger: "Si el parcial cae bajo -4, pedir control y buscar tiro de alto porcentaje."
+    }
+  };
+  const base = baseByQuarter[quarter.quarter] ?? {
+    phase: "Tramo clave",
+    objective: "Sostener el plan sin perder calidad de decision.",
+    risk: "Ceder ritmo por malas posesiones.",
+    decision: quarter.recommendation,
+    trigger: "Revisar tendencia y ajustar rotacion."
+  };
+  const isAttack = quarter.quarter === attackQuarter;
+  const isRisk = quarter.quarter === riskQuarter;
+
+  return {
+    ...base,
+    role: isAttack ? "Cuarto para atacar" : isRisk ? "Cuarto para resistir" : "Tramo de control",
+    decision: `${base.decision} Lectura modelo: ${quarter.recommendation}.`,
+    tone: isAttack ? "attack" : isRisk ? "risk" : quarter.quarter === "4C" ? "control" : "neutral"
+  };
+}
+
 function trendState(delta: number, threshold = 2) {
   if (!Number.isFinite(delta)) {
     return "Sin muestra";
@@ -903,8 +966,791 @@ function buildPdf(content: string) {
   return pdf;
 }
 
+type PdfRgb = [number, number, number];
+
+function hexToPdfRgb(hex: string): PdfRgb {
+  const cleaned = hex.replace("#", "");
+  const value = cleaned.length === 3
+    ? cleaned.split("").map((char) => `${char}${char}`).join("")
+    : cleaned.padEnd(6, "0").slice(0, 6);
+  return [
+    parseInt(value.slice(0, 2), 16) / 255,
+    parseInt(value.slice(2, 4), 16) / 255,
+    parseInt(value.slice(4, 6), 16) / 255
+  ];
+}
+
+function rgbCommand(color: PdfRgb) {
+  return color.map((value) => value.toFixed(3)).join(" ");
+}
+
+function pdfText(value: string) {
+  return normalizePdfText(value).replace(/\n/g, " ");
+}
+
+function addRect(commands: string[], x: number, y: number, width: number, height: number, fill: PdfRgb, stroke?: PdfRgb) {
+  if (stroke) {
+    commands.push(`${rgbCommand(fill)} rg ${rgbCommand(stroke)} RG ${x} ${y} ${width} ${height} re B`);
+    return;
+  }
+  commands.push(`${rgbCommand(fill)} rg ${x} ${y} ${width} ${height} re f`);
+}
+
+function addShadowRect(commands: string[], x: number, y: number, width: number, height: number, fill: PdfRgb, stroke?: PdfRgb) {
+  addRect(commands, x + 5, y - 5, width, height, [0.86, 0.88, 0.86]);
+  addRect(commands, x + 2, y - 2, width, height, [0.91, 0.93, 0.91]);
+  addRect(commands, x, y, width, height, fill, stroke);
+}
+
+function addCircle(commands: string[], x: number, y: number, radius: number, fill: PdfRgb, stroke?: PdfRgb, width = 1) {
+  const c = radius * 0.5522847498;
+  const strokeCommand = stroke ? `${rgbCommand(stroke)} RG ${width} w` : "";
+  const operator = stroke ? "B" : "f";
+  commands.push(
+    `${rgbCommand(fill)} rg ${strokeCommand} ${x + radius} ${y} m ${x + radius} ${y + c} ${x + c} ${y + radius} ${x} ${y + radius} c ${x - c} ${y + radius} ${x - radius} ${y + c} ${x - radius} ${y} c ${x - radius} ${y - c} ${x - c} ${y - radius} ${x} ${y - radius} c ${x + c} ${y - radius} ${x + radius} ${y - c} ${x + radius} ${y} c ${operator}`
+  );
+}
+
+function addText(
+  commands: string[],
+  text: string,
+  x: number,
+  y: number,
+  size = 11,
+  color: PdfRgb = [0.08, 0.09, 0.08],
+  font = "F1"
+) {
+  commands.push(`${rgbCommand(color)} rg BT /${font} ${size} Tf ${x} ${y} Td (${pdfText(text)}) Tj ET`);
+}
+
+function pdfWrappedLines(text: string, width: number, size: number) {
+  const maxChars = Math.max(14, Math.floor(width / (size * 0.52)));
+  const words = pdfText(text).split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+  words.forEach((word) => {
+    if (`${current} ${word}`.trim().length > maxChars) {
+      if (current) {
+        lines.push(current);
+      }
+      current = word;
+    } else {
+      current = `${current} ${word}`.trim();
+    }
+  });
+  if (current) {
+    lines.push(current);
+  }
+  return lines.length ? lines : [""];
+}
+
+function addWrappedText(
+  commands: string[],
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+  size = 11,
+  color: PdfRgb = [0.22, 0.28, 0.25],
+  font = "F1",
+  lineHeight = size + 4,
+  maxLines = 3
+) {
+  const lines = pdfWrappedLines(text, width, size);
+  const limited = lines.slice(0, maxLines);
+  if (lines.length > maxLines && limited.length > 0) {
+    const last = limited[limited.length - 1];
+    limited[limited.length - 1] = `${last.slice(0, Math.max(0, last.length - 3))}...`;
+  }
+  limited.forEach((line, index) => addText(commands, line, x, y - index * lineHeight, size, color, font));
+  return y - limited.length * lineHeight;
+}
+
+function addPill(commands: string[], text: string, x: number, y: number, fill: PdfRgb, color: PdfRgb, width = 120) {
+  addRect(commands, x, y - 17, width, 22, fill, [0.86, 0.86, 0.82]);
+  addText(commands, text, x + 10, y - 10, 8.5, color, "F2");
+}
+
+function addMetricCard(
+  commands: string[],
+  label: string,
+  value: string,
+  caption: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  accent: PdfRgb
+) {
+  addShadowRect(commands, x, y - height, width, height, [1, 1, 1], [0.84, 0.87, 0.84]);
+  addRect(commands, x, y - 5, width, 5, accent);
+  addRect(commands, x, y - height, 5, height, accent);
+  addText(commands, label.toUpperCase(), x + 12, y - 22, 8.5, accent, "F2");
+  addWrappedText(commands, value, x + 16, y - 48, width - 30, 18, [0.06, 0.08, 0.07], "F2", 20, 2);
+  addWrappedText(commands, caption, x + 12, y - height + 28, width - 24, 9.5, [0.36, 0.42, 0.39], "F1", 12, 2);
+}
+
+function addHeader(commands: string[], title: string, subtitle: string, pageNumber: string, primary: PdfRgb) {
+  addRect(commands, 0, 0, 960, 540, [0.956, 0.972, 0.962]);
+  addRect(commands, 0, 512, 960, 28, [0.055, 0.075, 0.062]);
+  addRect(commands, 0, 512, 268, 28, primary);
+  addRect(commands, 36, 468, 6, 40, primary);
+  addText(commands, "DOS SCOUT PRO", 54, 496, 9, primary, "F2");
+  addText(commands, title, 54, 470, 24, [0.06, 0.08, 0.07], "F2");
+  addText(commands, subtitle, 56, 450, 10.5, [0.36, 0.42, 0.39], "F1");
+  addRect(commands, 850, 486, 72, 22, [1, 1, 1], [0.82, 0.86, 0.82]);
+  addText(commands, pageNumber, 868, 494, 9, primary, "F2");
+}
+
+function addBar(commands: string[], x: number, y: number, width: number, value: number, max: number, color: PdfRgb) {
+  const safeMax = Math.max(max, 1);
+  addRect(commands, x, y, width, 8, [0.9, 0.93, 0.91]);
+  addRect(commands, x, y, Math.max(4, Math.min(width, (value / safeMax) * width)), 8, color);
+}
+
+function clampPdf(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function addLine(commands: string[], x1: number, y1: number, x2: number, y2: number, color: PdfRgb, width = 1) {
+  commands.push(`${rgbCommand(color)} RG ${width} w ${x1} ${y1} m ${x2} ${y2} l S`);
+}
+
+function addPolygon(commands: string[], points: Array<[number, number]>, fill: PdfRgb, stroke: PdfRgb, width = 1) {
+  if (points.length < 3) {
+    return;
+  }
+  const [first, ...rest] = points;
+  commands.push(
+    `${rgbCommand(fill)} rg ${rgbCommand(stroke)} RG ${width} w ${first[0]} ${first[1]} m ${rest
+      .map(([x, y]) => `${x} ${y} l`)
+      .join(" ")} h B`
+  );
+}
+
+function addDot(commands: string[], x: number, y: number, size: number, fill: PdfRgb, stroke?: PdfRgb) {
+  addCircle(commands, x, y, size / 2, fill, stroke, 1.2);
+}
+
+function addFooter(commands: string[], page: string, model: MatchupScout, primary: PdfRgb) {
+  addLine(commands, 36, 30, 924, 30, [0.84, 0.86, 0.84], 0.8);
+  addText(commands, "DOS Scout Pro · Dossier tactico", 38, 16, 8.5, [0.36, 0.42, 0.39], "F2");
+  addText(commands, `${model.ownTeam.team.name} vs ${model.rivalTeam.team.name}`, 340, 16, 8.5, [0.36, 0.42, 0.39], "F1");
+  addText(commands, page, 882, 16, 8.5, primary, "F2");
+}
+
+function pairScores(ownValue: number, rivalValue: number, lowerIsBetter = false) {
+  const safeOwn = Math.max(0, ownValue);
+  const safeRival = Math.max(0, rivalValue);
+  const total = safeOwn + safeRival;
+  if (total <= 0) {
+    return { own: 50, rival: 50 };
+  }
+  if (lowerIsBetter) {
+    return {
+      own: clampPdf((safeRival / total) * 100, 10, 90),
+      rival: clampPdf((safeOwn / total) * 100, 10, 90)
+    };
+  }
+  return {
+    own: clampPdf((safeOwn / total) * 100, 10, 90),
+    rival: clampPdf((safeRival / total) * 100, 10, 90)
+  };
+}
+
+function addRadarChart(
+  commands: string[],
+  metrics: Array<{ label: string; own: number; rival: number }>,
+  x: number,
+  y: number,
+  radius: number,
+  primary: PdfRgb
+) {
+  const red: PdfRgb = [0.88, 0.11, 0.28];
+  const centerX = x + radius;
+  const centerY = y + radius;
+  const pointFor = (value: number, index: number, scale = 1): [number, number] => {
+    const angle = -Math.PI / 2 + (index / metrics.length) * Math.PI * 2;
+    const r = radius * scale * clampPdf(value, 0, 100) / 100;
+    return [Number((centerX + Math.cos(angle) * r).toFixed(2)), Number((centerY + Math.sin(angle) * r).toFixed(2))];
+  };
+
+  [0.33, 0.66, 1].forEach((scale) => {
+    const ring = metrics.map((metric, index) => pointFor(100, index, scale));
+    addPolygon(commands, ring, [0.98, 0.99, 0.98], [0.82, 0.85, 0.82], 0.8);
+  });
+
+  metrics.forEach((metric, index) => {
+    const edge = pointFor(100, index);
+    addLine(commands, centerX, centerY, edge[0], edge[1], [0.82, 0.85, 0.82], 0.8);
+    const labelPoint = pointFor(116, index);
+    addWrappedText(commands, metric.label, labelPoint[0] - 34, labelPoint[1] + 5, 68, 8.5, [0.36, 0.42, 0.39], "F2", 10, 2);
+  });
+
+  addPolygon(commands, metrics.map((metric, index) => pointFor(metric.rival, index)), [1, 0.92, 0.94], red, 1.8);
+  addPolygon(commands, metrics.map((metric, index) => pointFor(metric.own, index)), [0.88, 0.97, 0.94], primary, 2.2);
+  addText(commands, "Propio", x + 8, y - 12, 9, primary, "F2");
+  addText(commands, "Rival", x + 74, y - 12, 9, red, "F2");
+}
+
+function addComparisonRow(
+  commands: string[],
+  label: string,
+  ownValue: number,
+  rivalValue: number,
+  x: number,
+  y: number,
+  width: number,
+  primary: PdfRgb,
+  lowerIsBetter = false
+) {
+  const scores = pairScores(ownValue, rivalValue, lowerIsBetter);
+  addText(commands, label, x, y + 2, 9, [0.36, 0.42, 0.39], "F2");
+  addText(commands, formatPdfNumber(ownValue), x + 110, y + 2, 9, [0.06, 0.08, 0.07], "F2");
+  addText(commands, formatPdfNumber(rivalValue), x + width - 34, y + 2, 9, [0.06, 0.08, 0.07], "F2");
+  addRect(commands, x + 160, y, width - 220, 8, [0.9, 0.92, 0.9]);
+  addRect(commands, x + 160, y, (width - 220) * scores.own / 100, 8, primary);
+  addRect(commands, x + 160 + (width - 220) * scores.own / 100, y, (width - 220) * scores.rival / 100, 8, [0.88, 0.11, 0.28]);
+}
+
+function addSectionKicker(commands: string[], title: string, x: number, y: number, color: PdfRgb) {
+  addText(commands, title.toUpperCase(), x, y, 9, color, "F2");
+  addLine(commands, x, y - 8, x + 110, y - 8, color, 2);
+}
+
+function addRotationList(commands: string[], title: string, players: string[], x: number, y: number, width: number, color: PdfRgb) {
+  addShadowRect(commands, x, y - 86, width, 86, [1, 1, 1], [0.87, 0.88, 0.86]);
+  addRect(commands, x, y - 5, width, 5, color);
+  addText(commands, title, x + 12, y - 24, 10, color, "F2");
+  const names = players.length ? players.slice(0, 6) : ["sin muestra suficiente"];
+  names.forEach((player, index) => {
+    const col = index % 2;
+    const row = Math.floor(index / 2);
+    const chipX = x + 12 + col * ((width - 30) / 2);
+    const chipY = y - 45 - row * 18;
+    addRect(commands, chipX, chipY - 11, (width - 40) / 2, 14, [0.96, 0.98, 0.97], [0.88, 0.9, 0.88]);
+    addWrappedText(commands, formatRotationName(player), chipX + 6, chipY - 5, (width - 52) / 2, 7.4, [0.06, 0.08, 0.07], "F2", 8, 1);
+  });
+}
+
+function addShotCourt(commands: string[], shots: ShotRow[], x: number, y: number, width: number, height: number, primary: PdfRgb) {
+  addShadowRect(commands, x, y, width, height, [0.96, 0.98, 0.97], [0.7, 0.74, 0.72]);
+  addLine(commands, x + width / 2, y, x + width / 2, y + height, [0.7, 0.74, 0.72], 1);
+  addRect(commands, x, y + height * 0.28, width * 0.19, height * 0.44, [0.96, 0.98, 0.97], [0.7, 0.74, 0.72]);
+  addRect(commands, x + width * 0.81, y + height * 0.28, width * 0.19, height * 0.44, [0.96, 0.98, 0.97], [0.7, 0.74, 0.72]);
+  addCircle(commands, x + width * 0.075, y + height * 0.5, 6, [0.96, 0.98, 0.97], [0.7, 0.74, 0.72]);
+  addCircle(commands, x + width * 0.925, y + height * 0.5, 6, [0.96, 0.98, 0.97], [0.7, 0.74, 0.72]);
+  shots.slice(0, 70).forEach((shot) => {
+    const px = x + clampPdf(shot.x, 2, 98) / 100 * width;
+    const py = y + clampPdf(shot.y, 2, 98) / 100 * height;
+    addDot(commands, px, py, shot.made ? 7 : 6, shot.made ? primary : [0.88, 0.11, 0.28], [1, 1, 1]);
+  });
+}
+
+function formatPdfNumber(value: number, suffix = "") {
+  if (!Number.isFinite(value)) {
+    return "s/d";
+  }
+  const rounded = Number(value.toFixed(1));
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}${suffix}`;
+}
+
+function signedPdfNumber(value: number, suffix = "") {
+  if (!Number.isFinite(value)) {
+    return "s/d";
+  }
+  return `${value > 0 ? "+" : ""}${formatPdfNumber(value, suffix)}`;
+}
+
+function confidencePdf(evidence: EvidenceLevel, confidence: number) {
+  return `${evidence} - ${Math.round(confidence * 100)}%`;
+}
+
+function teamPrimaryColor(name: string) {
+  const theme = teamThemeFor(name) as Record<string, string>;
+  return hexToPdfRgb(theme["--team-primary"] ?? "#0f766e");
+}
+
+function addPlayerDossierCard(
+  commands: string[],
+  player: MatchupScout["rivalPlayers"][number],
+  index: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  accent: PdfRgb
+) {
+  addShadowRect(commands, x, y - height, width, height, [1, 1, 1], [0.87, 0.88, 0.86]);
+  addRect(commands, x, y - 5, width, 5, index === 0 ? [0.88, 0.11, 0.28] : accent);
+  addCircle(commands, x + 23, y - 31, 15, index === 0 ? [1, 0.92, 0.94] : [0.9, 0.97, 0.94], [0.84, 0.86, 0.84]);
+  addText(commands, `${index + 1}`, x + 16, y - 37, 15, index === 0 ? [0.88, 0.11, 0.28] : accent, "F2");
+  addWrappedText(commands, player.name, x + 42, y - 20, width - 54, 14, [0.06, 0.08, 0.07], "F2", 16, 2);
+  addText(commands, player.role, x + 42, y - 55, 9.5, [0.36, 0.42, 0.39], "F1");
+  addText(commands, `MIN ${formatPdfNumber(player.minutes)}   PTS ${formatPdfNumber(player.points)}   REB ${formatPdfNumber(player.rebounds)}   AST ${formatPdfNumber(player.assists)}`, x + 12, y - 82, 9.5, [0.08, 0.09, 0.08], "F2");
+  addWrappedText(commands, `Plan: ${player.defensiveKey}`, x + 12, y - 108, width - 24, 9.8, [0.22, 0.28, 0.25], "F1", 12, 3);
+  addWrappedText(commands, `Gatillo: ${player.decisionTrigger}`, x + 12, y - height + 30, width - 24, 8.6, [0.36, 0.42, 0.39], "F1", 11, 2);
+}
+
+function addQuarterDossierCard(
+  commands: string[],
+  quarter: MatchupScout["quarterModel"][number],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  maxPoints: number,
+  maxDiff: number,
+  accent: PdfRgb,
+  attackQuarter?: string,
+  riskQuarter?: string
+) {
+  const plan = buildQuarterPlan(quarter, attackQuarter, riskQuarter);
+  const toneColor: PdfRgb = plan.tone === "risk" ? [0.88, 0.11, 0.28] : plan.tone === "control" ? [0.96, 0.62, 0.04] : accent;
+  addShadowRect(commands, x, y - height, width, height, [1, 1, 1], [0.87, 0.88, 0.86]);
+  addRect(commands, x, y - 6, width, 6, toneColor);
+  addText(commands, quarter.quarter, x + 14, y - 34, 22, toneColor, "F2");
+  addWrappedText(commands, plan.role, x + 60, y - 22, width - 72, 10, [0.06, 0.08, 0.07], "F2", 12, 2);
+  addText(commands, "Favor", x + 14, y - 66, 8, [0.36, 0.42, 0.39], "F2");
+  addBar(commands, x + 58, y - 69, width - 100, quarter.pointsFor, maxPoints, accent);
+  addText(commands, formatPdfNumber(quarter.pointsFor), x + width - 36, y - 72, 8.5, [0.06, 0.08, 0.07], "F2");
+  addText(commands, "Contra", x + 14, y - 88, 8, [0.36, 0.42, 0.39], "F2");
+  addBar(commands, x + 58, y - 91, width - 100, quarter.pointsAgainst, maxPoints, [0.98, 0.45, 0.16]);
+  addText(commands, formatPdfNumber(quarter.pointsAgainst), x + width - 36, y - 94, 8.5, [0.06, 0.08, 0.07], "F2");
+  addText(commands, "DIF", x + 14, y - 118, 8, [0.36, 0.42, 0.39], "F2");
+  addBar(commands, x + 58, y - 121, width - 100, Math.abs(quarter.differential), maxDiff, toneColor);
+  addText(commands, signedPdfNumber(quarter.differential), x + width - 42, y - 124, 8.5, toneColor, "F2");
+  addWrappedText(commands, plan.decision, x + 14, y - 146, width - 28, 8.8, [0.22, 0.28, 0.25], "F1", 11, 4);
+}
+
+function addRecentGameRows(
+  commands: string[],
+  title: string,
+  games: MatchupScout["ownTeam"]["recentGames"],
+  x: number,
+  y: number,
+  width: number,
+  accent: PdfRgb
+) {
+  addShadowRect(commands, x, y - 160, width, 160, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addRect(commands, x, y - 5, width, 5, accent);
+  addText(commands, title, x + 16, y - 28, 11, accent, "F2");
+  const rows = games.slice(0, 5);
+  if (rows.length === 0) {
+    addWrappedText(commands, "Sin partidos confirmados para este filtro. Revisa muestra o sincroniza links oficiales.", x + 16, y - 62, width - 32, 10, [0.36, 0.42, 0.39], "F1", 13, 3);
+    return;
+  }
+  rows.forEach((game, index) => {
+    const rowY = y - 58 - index * 22;
+    const resultColor: PdfRgb = game.result === "G" ? [0.08, 0.58, 0.44] : [0.88, 0.11, 0.28];
+    addRect(commands, x + 16, rowY - 10, 18, 16, game.result === "G" ? [0.86, 0.97, 0.93] : [1, 0.9, 0.92], [0.84, 0.86, 0.84]);
+    addText(commands, game.result, x + 22, rowY - 5, 8, resultColor, "F2");
+    addText(commands, game.score, x + 44, rowY - 5, 9.5, [0.06, 0.08, 0.07], "F2");
+    addWrappedText(commands, `${game.venue === "Local" ? "vs" : "@"} ${game.opponent}`, x + 96, rowY - 2, width - 190, 8.8, [0.22, 0.28, 0.25], "F2", 10, 1);
+    addText(commands, game.venue, x + width - 58, rowY - 5, 8.2, [0.36, 0.42, 0.39], "F1");
+  });
+}
+
+function addThinStat(
+  commands: string[],
+  label: string,
+  ownValue: string,
+  rivalValue: string,
+  x: number,
+  y: number,
+  width: number,
+  primary: PdfRgb
+) {
+  addText(commands, label, x, y, 9, [0.36, 0.42, 0.39], "F2");
+  addText(commands, ownValue, x + width * 0.45, y, 11, primary, "F2");
+  addText(commands, rivalValue, x + width - 44, y, 11, [0.88, 0.11, 0.28], "F2");
+  addLine(commands, x, y - 10, x + width, y - 10, [0.88, 0.9, 0.88], 0.7);
+}
+
+function addPlayerMatrixRow(
+  commands: string[],
+  player: MatchupScout["rivalPlayers"][number],
+  index: number,
+  x: number,
+  y: number,
+  width: number,
+  accent: PdfRgb
+) {
+  addRect(commands, x, y - 35, width, 38, index % 2 === 0 ? [1, 1, 1] : [0.97, 0.98, 0.97], [0.88, 0.9, 0.88]);
+  addCircle(commands, x + 18, y - 15, 10, index === 0 ? [1, 0.9, 0.92] : [0.9, 0.97, 0.94], [0.84, 0.86, 0.84]);
+  addText(commands, String(index + 1), x + 14, y - 19, 9, index === 0 ? [0.88, 0.11, 0.28] : accent, "F2");
+  addWrappedText(commands, player.name, x + 38, y - 8, 150, 9.2, [0.06, 0.08, 0.07], "F2", 10, 1);
+  addText(commands, formatPdfNumber(player.minutes), x + 210, y - 18, 9, [0.06, 0.08, 0.07], "F2");
+  addText(commands, formatPdfNumber(player.points), x + 270, y - 18, 9, [0.06, 0.08, 0.07], "F2");
+  addText(commands, formatPdfNumber(player.rebounds), x + 330, y - 18, 9, [0.06, 0.08, 0.07], "F2");
+  addText(commands, formatPdfNumber(player.assists), x + 390, y - 18, 9, [0.06, 0.08, 0.07], "F2");
+  addWrappedText(commands, player.defensiveKey, x + 450, y - 8, width - 466, 8.4, [0.22, 0.28, 0.25], "F1", 10, 2);
+}
+
+function addThreeColumnInsight(
+  commands: string[],
+  title: string,
+  value: string,
+  body: string,
+  x: number,
+  y: number,
+  width: number,
+  accent: PdfRgb
+) {
+  addShadowRect(commands, x, y - 132, width, 132, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addRect(commands, x, y - 5, width, 5, accent);
+  addText(commands, title.toUpperCase(), x + 14, y - 26, 8.5, accent, "F2");
+  addWrappedText(commands, value, x + 14, y - 54, width - 28, 16, [0.06, 0.08, 0.07], "F2", 18, 2);
+  addWrappedText(commands, body, x + 14, y - 96, width - 28, 9, [0.36, 0.42, 0.39], "F1", 12, 3);
+}
+
+function buildPdfDocument(pageStreams: string[]) {
+  const objects: string[] = [];
+  const pageRefs: number[] = [];
+  objects.push("<< /Type /Catalog /Pages 2 0 R >>");
+  objects.push("");
+
+  pageStreams.forEach((stream, pageIndex) => {
+    const pageObjectNumber = 3 + pageIndex * 2;
+    const contentObjectNumber = pageObjectNumber + 1;
+    pageRefs.push(pageObjectNumber);
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> >> >> /Contents ${contentObjectNumber} 0 R >>`);
+    objects.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+  });
+
+  objects[1] = `<< /Type /Pages /Kids [${pageRefs.map((ref) => `${ref} 0 R`).join(" ")}] /Count ${pageRefs.length} >>`;
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return pdf;
+}
+
+function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
+  const primary = teamPrimaryColor(model.ownTeam.team.name);
+  const dark: PdfRgb = [0.055, 0.075, 0.062];
+  const muted: PdfRgb = [0.36, 0.42, 0.39];
+  const amber: PdfRgb = [0.96, 0.62, 0.04];
+  const red: PdfRgb = [0.88, 0.11, 0.28];
+  const own = model.ownTeam.team;
+  const rival = model.rivalTeam.team;
+  const topThreat = model.rivalPlayers[0];
+  const topOwn = model.ownPlayers[0];
+  const bestQuarter = [...model.quarterModel].sort((a, b) => b.differential - a.differential)[0];
+  const riskQuarter = [...model.quarterModel].sort((a, b) => a.differential - b.differential)[0];
+  const generatedAt = new Date().toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const maxQuarterPoints = Math.max(...model.quarterModel.flatMap((quarter) => [quarter.pointsFor, quarter.pointsAgainst]), 1);
+  const maxQuarterDiff = Math.max(...model.quarterModel.map((quarter) => Math.abs(quarter.differential)), 1);
+  const topThreatShots = topThreat ? shots.filter((shot) => sameShotPlayer(shot.playerName, topThreat.name)) : [];
+  const shotFocus = topThreatShots.length > 0 ? topThreatShots : shots;
+  const shotFocusMade = shotFocus.filter((shot) => shot.made).length;
+  const radarMetrics = [
+    { label: "Ataque", ...pairScores(getPointsForPerGame(own), getPointsForPerGame(rival)) },
+    { label: "Defensa", ...pairScores(getPointsAgainstPerGame(own), getPointsAgainstPerGame(rival), true) },
+    { label: "Rebote", ...pairScores(getReboundsPerGame(own), getReboundsPerGame(rival)) },
+    { label: "Creacion", ...pairScores(getAssistsPerGame(own), getAssistsPerGame(rival)) },
+    { label: "Diferencial", own: clampPdf(50 + (getPointDifferential(own) - getPointDifferential(rival)) * 4, 10, 90), rival: clampPdf(50 + (getPointDifferential(rival) - getPointDifferential(own)) * 4, 10, 90) },
+    { label: "Prediccion", own: model.prediction.ownWinProbability, rival: model.prediction.rivalWinProbability }
+  ];
+  const ownRecent = recentTeamMetrics(model.ownTeam);
+  const rivalRecent = recentTeamMetrics(model.rivalTeam);
+  const ownSeason = seasonTeamMetrics(own);
+  const rivalSeason = seasonTeamMetrics(rival);
+  const firstHalfDiff = model.quarterModel
+    .filter((quarter) => quarter.quarter === "1C" || quarter.quarter === "2C")
+    .reduce((total, quarter) => total + quarter.differential, 0);
+  const secondHalfDiff = model.quarterModel
+    .filter((quarter) => quarter.quarter === "3C" || quarter.quarter === "4C")
+    .reduce((total, quarter) => total + quarter.differential, 0);
+  const rivalNine = model.rivalPlayers.slice(0, 9);
+  const ownSix = model.ownPlayers.slice(0, 6);
+  const sourceCount = Math.max(model.sourceTrace.length, model.ownTeam.recentGames.length + model.rivalTeam.recentGames.length);
+  const shotPct = shotFocus.length > 0 ? Math.round((shotFocusMade / shotFocus.length) * 100) : 0;
+  const pages: string[] = [];
+
+  const cover: string[] = [];
+  addRect(cover, 0, 0, 960, 540, [0.94, 0.96, 0.95]);
+  addRect(cover, 0, 0, 382, 540, dark);
+  addRect(cover, 0, 0, 382, 14, primary);
+  addRect(cover, 38, 72, 282, 2, primary);
+  addText(cover, "DOS SCOUT PRO", 38, 493, 10, [0.96, 0.85, 0.25], "F2");
+  addText(cover, "BRIEFING DE PARTIDO", 38, 462, 11, [0.78, 0.82, 0.78], "F2");
+  addWrappedText(cover, `${own.name} vs ${rival.name}`, 38, 410, 285, 34, [1, 1, 1], "F2", 36, 3);
+  addText(cover, `Liga DOS Chile · generado ${generatedAt}`, 40, 284, 11, [0.78, 0.82, 0.78], "F1");
+  addWrappedText(cover, model.rivalIdentity.summary, 40, 240, 285, 17, [1, 1, 1], "F2", 20, 4);
+  addPill(cover, confidencePdf(model.rivalIdentity.evidence, model.rivalIdentity.confidence), 40, 138, [1, 0.96, 0.82], [0.5, 0.32, 0.02], 198);
+  addText(cover, "No es un reporte de numeros. Es una hoja de decisiones para ganar tiempo de staff.", 40, 94, 10, [0.78, 0.82, 0.78], "F1");
+  addMetricCard(cover, "Record propio", model.ownTeam.recentRecord, `${formatPdfNumber(getPointsForPerGame(own))} PF/PJ · DIF ${signedPdfNumber(getPointDifferential(own))}`, 430, 470, 150, 92, primary);
+  addMetricCard(cover, "Record rival", model.rivalTeam.recentRecord, `${formatPdfNumber(getPointsForPerGame(rival))} PF/PJ · DIF ${signedPdfNumber(getPointDifferential(rival))}`, 596, 470, 150, 92, red);
+  addMetricCard(cover, "Win prob.", `${model.prediction.ownWinProbability}%`, model.prediction.marginRange, 762, 470, 150, 92, amber);
+  addMetricCard(cover, "Amenaza rival", topThreat?.name ?? "Sin muestra", topThreat ? `${topThreat.role} · ${formatPdfNumber(topThreat.points)} PTS/PJ` : "Pendiente de datos", 430, 342, 222, 112, red);
+  addMetricCard(cover, "Ventaja propia", topOwn?.name ?? "Sin muestra", topOwn ? `${topOwn.role} · impacto ${formatPdfNumber(topOwn.recentImpactIndex)}` : "Pendiente de datos", 676, 342, 236, 112, primary);
+  addMetricCard(cover, "Cuarto de quiebre", bestQuarter?.quarter ?? "s/d", bestQuarter ? `${signedPdfNumber(bestQuarter.differential)} · ${bestQuarter.recommendation}` : "Sin modelo suficiente", 430, 196, 222, 112, amber);
+  addMetricCard(cover, "Base estadistica", `${formatPdfNumber(getReboundsPerGame(own))} vs ${formatPdfNumber(getReboundsPerGame(rival))}`, `REB/PJ · AST ${formatPdfNumber(getAssistsPerGame(own))} vs ${formatPdfNumber(getAssistsPerGame(rival))}`, 676, 196, 236, 112, primary);
+  addFooter(cover, "01 / 15", model, primary);
+  pages.push(cover.join("\n"));
+
+  const quick: string[] = [];
+  addHeader(quick, "Si solo tienes 30 segundos", "Lo que el entrenador debe recordar antes de entrar a cancha", "02 / 07", primary);
+  addRect(quick, 42, 302, 876, 100, dark);
+  addText(quick, "PLAN MADRE", 62, 370, 10, [0.96, 0.85, 0.25], "F2");
+  addWrappedText(quick, model.decisionBrief[0]?.action ?? "Controlar ritmo, rebote y primera ventaja rival.", 62, 340, 540, 25, [1, 1, 1], "F2", 28, 2);
+  addText(quick, `${model.prediction.ownWinProbability}% victoria propia`, 704, 356, 24, [1, 1, 1], "F2");
+  addBar(quick, 706, 326, 160, model.prediction.ownWinProbability, 100, primary);
+  addText(quick, `Margen esperado ${model.prediction.marginRange}`, 706, 304, 10, [0.78, 0.82, 0.78], "F1");
+  model.decisionBrief.slice(0, 6).forEach((decision, index) => {
+    const col = index % 3;
+    const row = Math.floor(index / 3);
+    const x = 42 + col * 292;
+    const y = 260 - row * 104;
+    const tone: PdfRgb = decision.tone === "risk" ? red : decision.tone === "advantage" ? primary : amber;
+    addMetricCard(quick, decision.label, decision.value, decision.action, x, y, 268, 86, tone);
+  });
+  addFooter(quick, "02 / 15", model, primary);
+  pages.push(quick.join("\n"));
+
+  const radar: string[] = [];
+  addHeader(radar, "Radar comparativo", "Forma reciente vs base de temporada para decidir donde cargar el partido", "03 / 07", primary);
+  addRect(radar, 42, 66, 412, 350, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(radar, "Lectura visual", 66, 386, primary);
+  addRadarChart(radar, radarMetrics, 116, 116, 132, primary);
+  addRect(radar, 494, 66, 424, 350, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(radar, "Ventajas / riesgos", 520, 386, primary);
+  addComparisonRow(radar, "PTS/PJ", getPointsForPerGame(own), getPointsForPerGame(rival), 520, 338, 360, primary);
+  addComparisonRow(radar, "PC/PJ", getPointsAgainstPerGame(own), getPointsAgainstPerGame(rival), 520, 296, 360, primary, true);
+  addComparisonRow(radar, "REB/PJ", getReboundsPerGame(own), getReboundsPerGame(rival), 520, 254, 360, primary);
+  addComparisonRow(radar, "AST/PJ", getAssistsPerGame(own), getAssistsPerGame(rival), 520, 212, 360, primary);
+  addComparisonRow(radar, "DIF", getPointDifferential(own), getPointDifferential(rival), 520, 170, 360, primary);
+  addRect(radar, 520, 92, 360, 48, [1, 0.96, 0.9], [0.92, 0.82, 0.62]);
+  addText(radar, "Decision", 534, 120, 9, [0.5, 0.32, 0.02], "F2");
+  addWrappedText(radar, model.comparison[0]?.value ?? "Cargar el partido donde exista mayor margen colectivo.", 610, 122, 250, 9.5, [0.22, 0.28, 0.25], "F1", 12, 2);
+  addFooter(radar, "03 / 15", model, primary);
+  pages.push(radar.join("\n"));
+
+  const identity: string[] = [];
+  addHeader(identity, "Identidad rival y rotacion", "Como juega, de quien depende y con quien probablemente cierra", "04 / 07", primary);
+  addRect(identity, 42, 270, 402, 146, dark);
+  addText(identity, "IDENTIDAD RIVAL", 62, 386, 9, [0.96, 0.85, 0.25], "F2");
+  addWrappedText(identity, model.rivalIdentity.summary, 62, 354, 330, 22, [1, 1, 1], "F2", 25, 3);
+  addText(identity, `Ritmo: ${model.rivalIdentity.rhythm}`, 62, 286, 10, [0.78, 0.82, 0.78], "F1");
+  addMetricCard(identity, "Ofensiva", model.rivalIdentity.offensiveStyle, "Carga ofensiva y patron de ritmo", 472, 416, 204, 112, primary);
+  addMetricCard(identity, "Defensa", model.rivalIdentity.defensiveStyle, model.rivalIdentity.clutchBehavior, 704, 416, 204, 112, red);
+  addMetricCard(identity, "Dependencia", model.rivalIdentity.playerDependency, "Top 3 ofensivo y volumen de tiro", 472, 270, 204, 112, amber);
+  addMetricCard(identity, "Clutch", model.rivalIdentity.clutchBehavior, "Revisar cierres con video", 704, 270, 204, 112, primary);
+  addRotationList(identity, "Quinteto probable", model.rivalRotation.starters, 42, 194, 280, red);
+  addRotationList(identity, "Primeros cambios", model.rivalRotation.firstChanges, 342, 194, 280, amber);
+  addRotationList(identity, "Cierre bajo presion", model.rivalRotation.closers, 642, 194, 276, primary);
+  addFooter(identity, "04 / 15", model, primary);
+  pages.push(identity.join("\n"));
+
+  const players: string[] = [];
+  addHeader(players, "Plan defensivo por jugador", "Prioridad: amenaza principal, titulares y primeros cambios", "05 / 07", primary);
+  model.rivalPlayers.slice(0, 6).forEach((player, index) => {
+    const col = index % 3;
+    const row = Math.floor(index / 3);
+    addPlayerDossierCard(players, player, index, 42 + col * 300, 396 - row * 176, 276, 152, primary);
+  });
+  addRect(players, 42, 42, 876, 44, [1, 0.96, 0.9], [0.92, 0.82, 0.62]);
+  addText(players, "Regla staff", 58, 66, 9, [0.5, 0.32, 0.02], "F2");
+  addWrappedText(players, `Si ${topThreat?.name ?? "la amenaza principal"} supera su umbral, cambiar cobertura antes de que entre en ritmo. No esperar timeout para ajustar.`, 150, 67, 720, 9.5, [0.22, 0.28, 0.25], "F1", 12, 2);
+  addFooter(players, "05 / 15", model, primary);
+  pages.push(players.join("\n"));
+
+  const shotPage: string[] = [];
+  addHeader(shotPage, "Carta de tiro y zonas", "Solo se muestra como dato confirmado si existen tiros importados desde Estadisticas completas", "06 / 07", primary);
+  addRect(shotPage, 42, 72, 520, 322, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(shotPage, "Mapa rival", 66, 364, primary);
+  if (shots.length > 0) {
+    addShotCourt(shotPage, shotFocus, 78, 112, 448, 214, primary);
+    addText(shotPage, "Convertido", 78, 90, 8.5, primary, "F2");
+    addText(shotPage, "Fallado", 158, 90, 8.5, red, "F2");
+  } else {
+    addRect(shotPage, 78, 112, 448, 214, [0.96, 0.98, 0.97], [0.78, 0.82, 0.79]);
+    addWrappedText(shotPage, "Carta de tiro pendiente. Reimporta los links de Estadisticas completas para persistir coordenadas y zonas de lanzamiento.", 110, 230, 380, 17, [0.36, 0.42, 0.39], "F2", 20, 4);
+  }
+  addMetricCard(shotPage, "Jugador foco", topThreat?.name ?? "s/d", topThreat ? `${formatPdfNumber(topThreat.points)} PTS/PJ · ${formatPdfNumber(topThreat.minutes)} MIN/PJ` : "Sin muestra", 594, 394, 300, 96, red);
+  addMetricCard(shotPage, "Tiros muestra", String(shotFocus.length), shots.length > 0 ? `${shotFocusMade}/${shotFocus.length} convertidos (${shotPct}%) en el foco visual` : "Sin coordenadas confirmadas", 594, 270, 300, 96, primary);
+  addMetricCard(shotPage, "Plan", "Contestar y comunicar", topThreat ? topThreat.defensiveKey : "Validar con video antes de cerrar plan", 594, 146, 300, 96, amber);
+  addFooter(shotPage, "06 / 15", model, primary);
+  pages.push(shotPage.join("\n"));
+
+  const quarters: string[] = [];
+  addHeader(quarters, "Momentum por cuartos y cierre", "Plan operativo para charla tecnica y ajustes en vivo", "07 / 07", primary);
+  model.quarterModel.forEach((quarter, index) => {
+    addQuarterDossierCard(quarters, quarter, 42 + index * 223, 408, 204, 182, maxQuarterPoints, maxQuarterDiff, primary, bestQuarter?.quarter, riskQuarter?.quarter);
+  });
+  addText(quarters, "Claves del partido", 42, 186, 18, dark, "F2");
+  model.tacticalKeysCore.slice(0, 3).forEach((key, index) => {
+    const x = 42 + index * 292;
+    addRect(quarters, x, 50, 266, 112, [1, 1, 1], [0.87, 0.88, 0.86]);
+    addRect(quarters, x, 156, 266, 6, index === 0 ? primary : index === 1 ? amber : red);
+    addText(quarters, `Clave ${index + 1}`, x + 14, 136, 9, index === 2 ? red : primary, "F2");
+    addWrappedText(quarters, key.title, x + 14, 116, 238, 12, dark, "F2", 14, 2);
+    addWrappedText(quarters, key.action, x + 14, 82, 238, 9.5, [0.22, 0.28, 0.25], "F1", 12, 3);
+  });
+  addText(quarters, `Atacar: ${bestQuarter?.quarter ?? "s/d"} · Resistir: ${riskQuarter?.quarter ?? "s/d"} · 1T ${signedPdfNumber(firstHalfDiff)} / 2T ${signedPdfNumber(secondHalfDiff)} · Validar con video.`, 42, 34, 9, muted, "F1");
+  addFooter(quarters, "07 / 15", model, primary);
+  pages.push(quarters.join("\n"));
+
+  const formPage: string[] = [];
+  addHeader(formPage, "Forma reciente", "Ultimos partidos para separar tendencia real de ruido de muestra", "08 / 15", primary);
+  addRecentGameRows(formPage, `Ultimos juegos · ${own.name}`, model.ownTeam.recentGames, 42, 400, 410, primary);
+  addRecentGameRows(formPage, `Ultimos juegos · ${rival.name}`, model.rivalTeam.recentGames, 508, 400, 410, red);
+  addThreeColumnInsight(formPage, "Impulso propio", `${formatPdfNumber(ownRecent.points)} pts`, `Diferencial reciente ${signedPdfNumber(ownRecent.differential)}. Si esta cifra supera la base, sostener ritmo sin caer en tiros rapidos de baja calidad.`, 42, 190, 270, primary);
+  addThreeColumnInsight(formPage, "Impulso rival", `${formatPdfNumber(rivalRecent.points)} pts`, `Diferencial reciente ${signedPdfNumber(rivalRecent.differential)}. Preparar primer ajuste si el rival anota temprano desde su primera ventaja.`, 344, 190, 270, red);
+  addThreeColumnInsight(formPage, "Decision de muestra", `${model.ownTeam.sampleRecord} vs ${model.rivalTeam.sampleRecord}`, "Usar la muestra para el plan inicial, pero contrastar con base temporada antes de tomar riesgos defensivos extremos.", 646, 190, 272, amber);
+  addFooter(formPage, "08 / 15", model, primary);
+  pages.push(formPage.join("\n"));
+
+  const basePage: string[] = [];
+  addHeader(basePage, "Base temporada", "Respaldo estadistico para no sobrerreaccionar a un solo partido", "09 / 15", primary);
+  addShadowRect(basePage, 42, 84, 876, 320, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(basePage, "Forma reciente vs base", 66, 372, primary);
+  addText(basePage, own.name, 270, 372, 10, primary, "F2");
+  addText(basePage, rival.name, 780, 372, 10, red, "F2");
+  addThinStat(basePage, "PTS/PJ temporada", formatPdfNumber(ownSeason.points), formatPdfNumber(rivalSeason.points), 80, 326, 790, primary);
+  addThinStat(basePage, "PTS/PJ muestra", formatPdfNumber(ownRecent.points), formatPdfNumber(rivalRecent.points), 80, 286, 790, primary);
+  addThinStat(basePage, "REB/PJ temporada", formatPdfNumber(ownSeason.rebounds), formatPdfNumber(rivalSeason.rebounds), 80, 246, 790, primary);
+  addThinStat(basePage, "AST/PJ temporada", formatPdfNumber(ownSeason.assists), formatPdfNumber(rivalSeason.assists), 80, 206, 790, primary);
+  addThinStat(basePage, "DIF/PJ temporada", signedPdfNumber(ownSeason.differential), signedPdfNumber(rivalSeason.differential), 80, 166, 790, primary);
+  addRect(basePage, 80, 102, 790, 38, [0.055, 0.075, 0.062], [0.055, 0.075, 0.062]);
+  addText(basePage, "Lectura staff", 98, 124, 9, [0.96, 0.85, 0.25], "F2");
+  addWrappedText(basePage, ownRecent.points - ownSeason.points >= rivalRecent.points - rivalSeason.points ? "La forma propia esta por sobre la base. El plan puede comenzar agresivo, pero debe proteger seleccion de tiro y rebote." : "El rival llega con mejor impulso relativo. Conviene bajar posesiones faciles y forzar ejecuciones largas desde el inicio.", 190, 124, 620, 9.5, [1, 1, 1], "F1", 12, 2);
+  addFooter(basePage, "09 / 15", model, primary);
+  pages.push(basePage.join("\n"));
+
+  const ownRotationPage: string[] = [];
+  addHeader(ownRotationPage, "Rotacion propia", "Como cargar nuestra ventaja sin perder estabilidad de banca", "10 / 15", primary);
+  addRect(ownRotationPage, 42, 300, 876, 110, dark);
+  addText(ownRotationPage, "IDENTIDAD PROPIA", 62, 382, 9, [0.96, 0.85, 0.25], "F2");
+  addWrappedText(ownRotationPage, model.ownIdentity.summary, 62, 352, 540, 22, [1, 1, 1], "F2", 25, 3);
+  addText(ownRotationPage, `Ritmo: ${model.ownIdentity.rhythm} · ${model.ownRotation.lineupStability}`, 644, 362, 10, [0.78, 0.82, 0.78], "F1");
+  addRotationList(ownRotationPage, "Quinteto propio", model.ownRotation.starters, 42, 252, 280, primary);
+  addRotationList(ownRotationPage, "Primeros cambios", model.ownRotation.firstChanges, 342, 252, 280, amber);
+  addRotationList(ownRotationPage, "Cierre probable", model.ownRotation.closers, 642, 252, 276, primary);
+  addThreeColumnInsight(ownRotationPage, "Banco", model.ownRotation.benchDependency, model.ownRotation.benchImpact, 42, 126, 270, primary);
+  addThreeColumnInsight(ownRotationPage, "Presion", model.ownRotation.pressureClosers, "Mantener al menos una fuente estable de ventaja en cancha durante cierres largos.", 344, 126, 270, amber);
+  addThreeColumnInsight(ownRotationPage, "Regla", `${Math.round(model.ownRotation.confidence * 100)}% confianza`, model.ownRotation.rule, 646, 126, 272, primary);
+  addFooter(ownRotationPage, "10 / 15", model, primary);
+  pages.push(ownRotationPage.join("\n"));
+
+  const rivalRotationPage: string[] = [];
+  addHeader(rivalRotationPage, "Rotacion rival ampliada", "Quien inicia, quien cambia el ritmo y quien probablemente cierra", "11 / 15", primary);
+  addRect(rivalRotationPage, 42, 300, 876, 110, [1, 0.95, 0.94], [0.92, 0.76, 0.76]);
+  addText(rivalRotationPage, "LECTURA DEFENSIVA", 62, 382, 9, red, "F2");
+  addWrappedText(rivalRotationPage, `La prioridad es sacar de ritmo a ${topThreat?.name ?? "la primera amenaza"} y no regalar confianza a la segunda unidad.`, 62, 350, 560, 22, dark, "F2", 25, 3);
+  addText(rivalRotationPage, `${model.rivalRotation.lineupStability} · ${model.rivalRotation.benchDependency}`, 650, 362, 10, muted, "F1");
+  addRotationList(rivalRotationPage, "Quinteto rival", model.rivalRotation.starters, 42, 252, 280, red);
+  addRotationList(rivalRotationPage, "Primeros cambios", model.rivalRotation.firstChanges, 342, 252, 280, amber);
+  addRotationList(rivalRotationPage, "Cierre rival", model.rivalRotation.closers, 642, 252, 276, red);
+  addThreeColumnInsight(rivalRotationPage, "Banco rival", model.rivalRotation.benchDependency, model.rivalRotation.benchImpact, 42, 126, 270, red);
+  addThreeColumnInsight(rivalRotationPage, "Clutch", model.rivalRotation.pressureClosers, "No cambiar automatico si el rival busca aislar al scorer. Comunicar cobertura antes de cada bloqueo.", 344, 126, 270, amber);
+  addThreeColumnInsight(rivalRotationPage, "Confianza", `${Math.round(model.rivalRotation.confidence * 100)}%`, model.rivalRotation.rule, 646, 126, 272, red);
+  addFooter(rivalRotationPage, "11 / 15", model, primary);
+  pages.push(rivalRotationPage.join("\n"));
+
+  const rivalMatrix: string[] = [];
+  addHeader(rivalMatrix, "Matriz defensiva de 9 jugadores", "Plan individual para amenaza principal, titulares y rotacion", "12 / 15", primary);
+  addShadowRect(rivalMatrix, 42, 66, 876, 350, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addText(rivalMatrix, "Jugador", 80, 382, 9, muted, "F2");
+  addText(rivalMatrix, "MIN", 252, 382, 9, muted, "F2");
+  addText(rivalMatrix, "PTS", 312, 382, 9, muted, "F2");
+  addText(rivalMatrix, "REB", 372, 382, 9, muted, "F2");
+  addText(rivalMatrix, "AST", 432, 382, 9, muted, "F2");
+  addText(rivalMatrix, "Plan defensivo", 492, 382, 9, muted, "F2");
+  rivalNine.forEach((player, index) => {
+    addPlayerMatrixRow(rivalMatrix, player, index, 66, 354 - index * 34, 820, primary);
+  });
+  addFooter(rivalMatrix, "12 / 15", model, primary);
+  pages.push(rivalMatrix.join("\n"));
+
+  const ownAdvantagePage: string[] = [];
+  addHeader(ownAdvantagePage, "Ventajas propias para cargar", "Quien debe recibir ventajas, como y con que gatillo", "13 / 15", primary);
+  ownSix.slice(0, 6).forEach((player, index) => {
+    const col = index % 3;
+    const row = Math.floor(index / 3);
+    const x = 42 + col * 300;
+    const y = 390 - row * 170;
+    addPlayerDossierCard(ownAdvantagePage, player, index, x, y, 276, 146, primary);
+  });
+  addRect(ownAdvantagePage, 42, 46, 876, 50, [0.055, 0.075, 0.062], [0.055, 0.075, 0.062]);
+  addText(ownAdvantagePage, "Regla ofensiva", 58, 70, 9, [0.96, 0.85, 0.25], "F2");
+  addWrappedText(ownAdvantagePage, `La primera presion debe venir desde ${topOwn?.name ?? "nuestro jugador de mayor impacto"}. Si el rival cambia matchup, repetir el emparejamiento debil en las siguientes dos posesiones.`, 160, 71, 690, 9.5, [1, 1, 1], "F1", 12, 2);
+  addFooter(ownAdvantagePage, "13 / 15", model, primary);
+  pages.push(ownAdvantagePage.join("\n"));
+
+  const validationPage: string[] = [];
+  addHeader(validationPage, "Validacion postpartido", "Lo proyectado vs lo real para vender aprendizaje, no solo prediccion", "14 / 15", primary);
+  addRect(validationPage, 42, 346, 876, 64, model.planValidation.headline.toLowerCase().includes("fuera") ? [1, 0.94, 0.94] : [0.9, 0.97, 0.94], [0.86, 0.88, 0.86]);
+  addText(validationPage, "VALIDACION DEL PLAN", 62, 384, 9, model.planValidation.headline.toLowerCase().includes("fuera") ? red : primary, "F2");
+  addWrappedText(validationPage, model.planValidation.headline, 62, 360, 760, 18, dark, "F2", 22, 2);
+  model.planValidation.checks.slice(0, 4).forEach((check, index) => {
+    const y = 304 - index * 54;
+    const statusColor: PdfRgb = check.status === "logrado" ? primary : check.status === "fallo" ? red : amber;
+    addShadowRect(validationPage, 42, y - 34, 876, 42, [1, 1, 1], [0.88, 0.9, 0.88]);
+    addText(validationPage, check.label, 62, y - 8, 9.5, dark, "F2");
+    addText(validationPage, `${check.projected} -> ${check.actual}`, 252, y - 8, 9.5, muted, "F1");
+    addText(validationPage, check.status.toUpperCase(), 520, y - 8, 9, statusColor, "F2");
+    addWrappedText(validationPage, check.decision, 640, y - 4, 230, 8.5, [0.22, 0.28, 0.25], "F1", 10, 2);
+  });
+  addRect(validationPage, 42, 44, 876, 38, [1, 0.96, 0.9], [0.92, 0.82, 0.62]);
+  addText(validationPage, "Trazabilidad", 60, 66, 9, [0.5, 0.32, 0.02], "F2");
+  addText(validationPage, `${sourceCount} fuentes / registros considerados · dato confirmado, inferencia y conclusion tactica separados`, 150, 66, 9, [0.22, 0.28, 0.25], "F1");
+  addFooter(validationPage, "14 / 15", model, primary);
+  pages.push(validationPage.join("\n"));
+
+  const benchPage: string[] = [];
+  addRect(benchPage, 0, 0, 960, 540, dark);
+  addRect(benchPage, 0, 0, 960, 18, primary);
+  addText(benchPage, "HOJA FINAL DE EJECUCION", 46, 486, 11, [0.96, 0.85, 0.25], "F2");
+  addWrappedText(benchPage, `${own.name} vs ${rival.name}`, 46, 444, 520, 34, [1, 1, 1], "F2", 38, 2);
+  addText(benchPage, "Que debe quedar en la pizarra antes del salto inicial", 48, 386, 12, [0.78, 0.82, 0.78], "F1");
+  [
+    { title: "1. Primer ajuste", value: model.tacticalKeysCore[0]?.action ?? "Sacar de ritmo a la primera ventaja rival." },
+    { title: "2. Ventaja propia", value: model.tacticalKeysCore[1]?.action ?? "Cargar nuestra primera fuente de ventaja." },
+    { title: "3. Posesiones", value: model.tacticalKeysCore[2]?.action ?? "Controlar rebote y perdida antes de acelerar." },
+    { title: "4. Cuarto de quiebre", value: `${bestQuarter?.quarter ?? "3C"}: ${bestQuarter?.recommendation ?? "subir agresividad despues del descanso."}` },
+    { title: "5. Cierre", value: `${riskQuarter?.quarter ?? "4C"}: proteger ritmo, faltas y seleccion de tiro.` }
+  ].forEach((item, index) => {
+    const y = 330 - index * 52;
+    addRect(benchPage, 46, y - 24, 600, 38, index === 0 ? [0.96, 0.85, 0.25] : [0.14, 0.17, 0.15], [0.28, 0.32, 0.28]);
+    addText(benchPage, item.title, 64, y - 2, 10, index === 0 ? dark : [0.96, 0.85, 0.25], "F2");
+    addWrappedText(benchPage, item.value, 208, y + 1, 402, 9.5, index === 0 ? dark : [1, 1, 1], "F1", 11, 2);
+  });
+  addRect(benchPage, 700, 96, 176, 270, [0.96, 0.85, 0.25], [0.96, 0.85, 0.25]);
+  addText(benchPage, "WIN PROB", 724, 326, 10, dark, "F2");
+  addText(benchPage, `${model.prediction.ownWinProbability}%`, 724, 270, 42, dark, "F2");
+  addText(benchPage, "Margen", 724, 218, 10, dark, "F2");
+  addWrappedText(benchPage, model.prediction.marginRange, 724, 194, 118, 15, dark, "F2", 18, 2);
+  addText(benchPage, "Confianza", 724, 138, 10, dark, "F2");
+  addText(benchPage, `${Math.round(model.prediction.confidence * 100)}%`, 724, 112, 22, dark, "F2");
+  addText(benchPage, "DOS Scout Pro · decision first scouting", 46, 36, 9, [0.78, 0.82, 0.78], "F2");
+  addText(benchPage, "15 / 15", 870, 36, 9, [0.96, 0.85, 0.25], "F2");
+  pages.push(benchPage.join("\n"));
+
+  return buildPdfDocument(pages);
+}
+
 function downloadPdf(filename: string, content: string) {
   const blob = new Blob([buildPdf(content)], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadPdfDocument(filename: string, pdf: string) {
+  const blob = new Blob([pdf], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -1187,6 +2033,22 @@ export function ScoutingPlatform() {
     Contra: quarter.pointsAgainst,
     Diferencial: quarter.differential
   }));
+  const sortedQuarterModel = [...model.quarterModel].sort((quarterA, quarterB) => quarterB.differential - quarterA.differential);
+  const quarterToAttack = sortedQuarterModel[0] ?? model.quarterModel[0];
+  const quarterToResist = sortedQuarterModel[sortedQuarterModel.length - 1] ?? quarterToAttack;
+  const closingQuarter = model.quarterModel.find((quarter) => quarter.quarter === "4C") ?? quarterToResist;
+  const firstHalfDiff = model.quarterModel
+    .filter((quarter) => quarter.quarter === "1C" || quarter.quarter === "2C")
+    .reduce((total, quarter) => total + quarter.differential, 0);
+  const secondHalfDiff = model.quarterModel
+    .filter((quarter) => quarter.quarter === "3C" || quarter.quarter === "4C")
+    .reduce((total, quarter) => total + quarter.differential, 0);
+  const quarterPlanCards = model.quarterModel.map((quarter) => ({
+    ...quarter,
+    plan: buildQuarterPlan(quarter, quarterToAttack?.quarter, quarterToResist?.quarter)
+  }));
+  const quarterMaxPoints = Math.max(...quarterPlanCards.flatMap((quarter) => [quarter.pointsFor, quarter.pointsAgainst]), 1);
+  const quarterMaxDiff = Math.max(...quarterPlanCards.map((quarter) => Math.abs(quarter.differential)), 1);
   const standings = [...teams].sort((teamA, teamB) => {
     const winsDelta = parseNumber(teamB.wins) - parseNumber(teamA.wins);
     if (winsDelta !== 0) {
@@ -1564,21 +2426,50 @@ export function ScoutingPlatform() {
             <p className="standings-note">La tabla se filtra por la zona del equipo propio seleccionado.</p>
           </section>
           <SignalList title="Alertas automaticas" signals={model.tacticalKeys.slice(0, isPlayerView ? 3 : 6)} />
-          <section className="module-panel">
+          <section className="module-panel dashboard-quarter-panel">
             <div className="module-heading">
-              <p className="eyebrow">Tendencia por cuartos</p>
-              <h3>Modelo inicial</h3>
+              <div>
+                <p className="eyebrow">Resumen por cuartos</p>
+                <h3>Momentum y decisiones</h3>
+              </div>
+              <EvidencePill evidence={quarterToAttack?.evidence ?? "inferencia estadistica"} confidence={quarterToAttack?.confidence ?? 0.52} />
             </div>
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={quarterChart}>
-                <CartesianGrid stroke="rgba(255,255,255,0.12)" />
-                <XAxis dataKey="quarter" stroke="#cbd5c7" />
-                <YAxis stroke="#cbd5c7" />
-                <Tooltip contentStyle={{ background: "#11120f", border: "1px solid #3f453b", borderRadius: 8 }} />
-                <Area dataKey="Favor" stroke="#2dd4bf" fill="#2dd4bf33" />
-                <Area dataKey="Contra" stroke="#f97316" fill="#f9731633" />
-              </AreaChart>
-            </ResponsiveContainer>
+            <div className="dashboard-quarter-layout">
+              <div className="dashboard-quarter-chart">
+                <ResponsiveContainer width="100%" height={230}>
+                  <AreaChart data={quarterChart}>
+                    <CartesianGrid stroke="rgba(22,31,27,0.08)" vertical={false} />
+                    <XAxis dataKey="quarter" stroke="#64716b" tickLine={false} axisLine={false} />
+                    <YAxis stroke="#64716b" tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ background: "#11120f", border: "1px solid #3f453b", borderRadius: 8, color: "#ffffff" }} />
+                    <Area type="monotone" dataKey="Favor" stroke="var(--team-primary, #0f766e)" fill="var(--team-soft, #dff7f1)" strokeWidth={3} />
+                    <Area type="monotone" dataKey="Contra" stroke="#f97316" fill="#fff0df" strokeWidth={3} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="dashboard-quarter-summary">
+                <article className="quarter-mini-card attack">
+                  <span>Atacar</span>
+                  <strong>{quarterToAttack?.quarter ?? "s/d"}</strong>
+                  <p>{quarterToAttack ? `${signedDelta(quarterToAttack.differential)} · ${quarterToAttack.recommendation}` : "Sin muestra suficiente."}</p>
+                </article>
+                <article className="quarter-mini-card risk">
+                  <span>Resistir</span>
+                  <strong>{quarterToResist?.quarter ?? "s/d"}</strong>
+                  <p>{quarterToResist ? `${signedDelta(quarterToResist.differential)} · controlar ritmo y rebote` : "Sin muestra suficiente."}</p>
+                </article>
+                <article className="quarter-mini-card split">
+                  <span>Mitades</span>
+                  <strong>{signedDelta(firstHalfDiff)} / {signedDelta(secondHalfDiff)}</strong>
+                  <p>1T vs 2T para saber si conviene acelerar o administrar despues del descanso.</p>
+                </article>
+                <article className="quarter-mini-card close">
+                  <span>Cierre</span>
+                  <strong>{closingQuarter ? `${closingQuarter.quarter} ${signedDelta(closingQuarter.differential)}` : "s/d"}</strong>
+                  <p>{closingQuarter ? closingQuarter.recommendation : "Revisar muestra antes de definir plan de cierre."}</p>
+                </article>
+              </div>
+            </div>
           </section>
         </section>
       ) : null}
@@ -1767,12 +2658,12 @@ export function ScoutingPlatform() {
       ) : null}
 
       {tab === "Rotacion" ? (
-        <section className="two-column">
+        <section className="two-column rotation-board">
           {[
             { label: "Propia", rotation: model.ownRotation },
             { label: "Rival", rotation: model.rivalRotation }
           ].map(({ label, rotation }) => (
-            <section className="module-panel" key={label}>
+            <section className={`module-panel rotation-panel ${label === "Propia" ? "own" : "rival"}`} key={label}>
               <div className="module-heading">
                 <div>
                   <p className="eyebrow">Rotacion {label}</p>
@@ -2005,32 +2896,127 @@ export function ScoutingPlatform() {
       ) : null}
 
       {tab === "Cuartos" ? (
-        <section className="module-panel">
-          <div className="module-heading">
-            <p className="eyebrow">Parciales</p>
-            <h3>Puntos a favor, en contra y diferencial por cuarto</h3>
-          </div>
-          <ResponsiveContainer width="100%" height={340}>
-            <BarChart data={quarterChart}>
-              <CartesianGrid stroke="rgba(255,255,255,0.12)" />
-              <XAxis dataKey="quarter" stroke="#cbd5c7" />
-              <YAxis stroke="#cbd5c7" />
-              <Tooltip contentStyle={{ background: "#11120f", border: "1px solid #3f453b", borderRadius: 8 }} />
-              <Bar dataKey="Favor" fill="#2dd4bf" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Contra" fill="#f97316" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Diferencial" fill="#eab308" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-          <div className="quarter-decision-grid">
-            {model.quarterModel.map((quarter) => (
-              <article key={quarter.quarter}>
-                <strong>{quarter.quarter} · {quarter.momentum}</strong>
-                <p>{quarter.recommendation}</p>
-                <small>Diferencial proyectado {quarter.differential}</small>
+        <section className="quarter-page">
+          <section className="module-panel quarter-momentum-panel">
+            <div className="module-heading">
+              <div>
+                <p className="eyebrow">Momentum tactico</p>
+                <h3>Plan por cuarto</h3>
+              </div>
+              <EvidencePill evidence={quarterToAttack?.evidence ?? "inferencia estadistica"} confidence={quarterToAttack?.confidence ?? 0.52} />
+            </div>
+
+            <div className="quarter-command-strip">
+              <article className="quarter-command-card attack">
+                <span>Cuarto para atacar</span>
+                <strong>{quarterToAttack?.quarter ?? "s/d"}</strong>
+                <p>{quarterToAttack ? `${signedDelta(quarterToAttack.differential)} diferencial · ${quarterToAttack.recommendation}` : "Sin muestra suficiente."}</p>
               </article>
-            ))}
-          </div>
-          <SignalList title="Lectura por cuarto" signals={model.tacticalKeys.slice(-2)} />
+              <article className="quarter-command-card hold">
+                <span>Cuarto para resistir</span>
+                <strong>{quarterToResist?.quarter ?? "s/d"}</strong>
+                <p>{quarterToResist ? `${signedDelta(quarterToResist.differential)} diferencial · proteger ritmo y faltas` : "Sin muestra suficiente."}</p>
+              </article>
+              <article className="quarter-command-card close">
+                <span>Lectura 2do tiempo</span>
+                <strong>{signedDelta(secondHalfDiff)}</strong>
+                <p>1er tiempo {signedDelta(firstHalfDiff)} · cierre {closingQuarter ? `${closingQuarter.quarter} ${signedDelta(closingQuarter.differential)}` : "s/d"}</p>
+              </article>
+            </div>
+
+            <div className="quarter-momentum-grid">
+              <div className="quarter-micro-chart-grid">
+                {quarterPlanCards.map((quarter) => (
+                  <article className={`quarter-micro-chart ${quarter.plan.tone}`} key={`${quarter.quarter}-chart`}>
+                    <div className="quarter-micro-head">
+                      <span>{quarter.quarter}</span>
+                      <div>
+                        <strong>{quarter.plan.role}</strong>
+                        <small>{quarter.momentum}</small>
+                      </div>
+                    </div>
+                    <div className="quarter-bars">
+                      <div className="quarter-bar-row own">
+                        <span>Favor</span>
+                        <i><b style={{ width: `${(quarter.pointsFor / quarterMaxPoints) * 100}%` }} /></i>
+                        <strong>{roundOne(quarter.pointsFor)}</strong>
+                      </div>
+                      <div className="quarter-bar-row rival">
+                        <span>Contra</span>
+                        <i><b style={{ width: `${(quarter.pointsAgainst / quarterMaxPoints) * 100}%` }} /></i>
+                        <strong>{roundOne(quarter.pointsAgainst)}</strong>
+                      </div>
+                    </div>
+                    <div className="quarter-diff-meter">
+                      <span>DIF</span>
+                      <i>
+                        <b
+                          className={quarter.differential >= 0 ? "positive" : "negative"}
+                          style={{ width: `${Math.min(50, (Math.abs(quarter.differential) / quarterMaxDiff) * 50)}%` }}
+                        />
+                      </i>
+                      <strong>{signedDelta(quarter.differential)}</strong>
+                    </div>
+                    <p>{quarter.recommendation}</p>
+                  </article>
+                ))}
+              </div>
+
+              <article className="quarter-break-card">
+                <span>Cuarto de quiebre</span>
+                <strong>{quarterToAttack?.quarter ?? "s/d"}</strong>
+                <p>
+                  {quarterToAttack
+                    ? `${quarterToAttack.momentum}. Atacar ese tramo con reglas claras: ${quarterToAttack.recommendation}.`
+                    : "El modelo necesita mas datos para proyectar un tramo dominante."}
+                </p>
+                <div className="quarter-break-metrics">
+                  <div>
+                    <small>DIF</small>
+                    <b>{quarterToAttack ? signedDelta(quarterToAttack.differential) : "s/d"}</b>
+                  </div>
+                  <div>
+                    <small>FAVOR</small>
+                    <b>{quarterToAttack ? roundOne(quarterToAttack.pointsFor) : "s/d"}</b>
+                  </div>
+                  <div>
+                    <small>CONTRA</small>
+                    <b>{quarterToAttack ? roundOne(quarterToAttack.pointsAgainst) : "s/d"}</b>
+                  </div>
+                </div>
+                <EvidencePill evidence={quarterToAttack?.evidence ?? "inferencia estadistica"} confidence={quarterToAttack?.confidence ?? 0.52} />
+              </article>
+            </div>
+          </section>
+
+          <section className="module-panel quarter-plan-panel">
+            <div className="module-heading">
+              <div>
+                <p className="eyebrow">Plan operativo</p>
+                <h3>Decisiones por cuarto</h3>
+              </div>
+              <small className="module-note">Lectura rapida para charla tecnica y ajustes en vivo.</small>
+            </div>
+            <div className="quarter-plan-grid">
+              {quarterPlanCards.map((quarter) => (
+                <article className={`quarter-plan-card ${quarter.plan.tone}`} key={quarter.quarter}>
+                  <div className="quarter-plan-top">
+                    <span>{quarter.quarter}</span>
+                    <small>{quarter.plan.role}</small>
+                  </div>
+                  <strong>{quarter.plan.phase}</strong>
+                  <p><b>Objetivo</b>{quarter.plan.objective}</p>
+                  <p><b>Riesgo</b>{quarter.plan.risk}</p>
+                  <p><b>Decision</b>{quarter.plan.decision}</p>
+                  <div className="quarter-trigger">
+                    <span>Gatillo en vivo</span>
+                    <p>{quarter.plan.trigger}</p>
+                  </div>
+                  <small>Diferencial proyectado {signedDelta(quarter.differential)}</small>
+                </article>
+              ))}
+            </div>
+          </section>
         </section>
       ) : null}
 
@@ -2074,9 +3060,31 @@ export function ScoutingPlatform() {
               </div>
             </article>
           </section>
+          <section className="comparison-edge-strip">
+            <article className={ownSeasonComparison.points >= rivalSeasonComparison.points ? "positive" : "risk"}>
+              <span>Ataque base</span>
+              <strong>{signedDelta(ownSeasonComparison.points - rivalSeasonComparison.points, " pts")}</strong>
+              <p>{model.ownTeam.team.name} vs {model.rivalTeam.team.name}</p>
+            </article>
+            <article className={ownSeasonComparison.differential >= rivalSeasonComparison.differential ? "positive" : "risk"}>
+              <span>Diferencial</span>
+              <strong>{signedDelta(ownSeasonComparison.differential - rivalSeasonComparison.differential)}</strong>
+              <p>Control de marcador y consistencia de muestra.</p>
+            </article>
+            <article className={ownSeasonComparison.rebounds >= rivalSeasonComparison.rebounds ? "positive" : "risk"}>
+              <span>Rebote</span>
+              <strong>{signedDelta(ownSeasonComparison.rebounds - rivalSeasonComparison.rebounds, " reb")}</strong>
+              <p>Margen de posesiones disponibles.</p>
+            </article>
+            <article className={ownSeasonComparison.assists >= rivalSeasonComparison.assists ? "positive" : "risk"}>
+              <span>Creacion</span>
+              <strong>{signedDelta(ownSeasonComparison.assists - rivalSeasonComparison.assists, " ast")}</strong>
+              <p>Fluidez ofensiva y calidad de ventaja.</p>
+            </article>
+          </section>
           <section className="comparison-insight-grid">
             <SignalList title="Rival vs propio equipo" signals={model.comparison} />
-            <section className="module-panel">
+            <section className="module-panel plan-decision-panel">
               <div className="module-heading">
                 <p className="eyebrow">Decision del plan</p>
                 <h3>Donde cargar el partido</h3>
@@ -2092,7 +3100,7 @@ export function ScoutingPlatform() {
               </div>
             </section>
           </section>
-          <section className="module-panel">
+          <section className="module-panel validation-panel">
             <div className="module-heading">
               <p className="eyebrow">Validacion postpartido</p>
               <h3>{model.planValidation.headline}</h3>
@@ -2121,9 +3129,9 @@ export function ScoutingPlatform() {
             {[
               {
                 kind: "prepartido" as const,
-                filename: "informe-prepartido-premium-liga-dos.pdf",
-                title: "Informe prepartido premium",
-                description: "Plan de partido, amenazas, ventajas, rotacion y checklist para cuerpo tecnico.",
+                filename: "dossier-tactico-pro-liga-dos.pdf",
+                title: "Dossier tactico pro",
+                description: "Dossier visual de 15 diapositivas: decisiones, forma, base temporada, rotaciones, planes individuales, carta de tiro y validacion.",
                 staffOnly: true
               },
               {
@@ -2152,7 +3160,13 @@ export function ScoutingPlatform() {
                 className="download-tile"
                 disabled={report.staffOnly && !canCreateReports}
                 key={report.kind}
-                onClick={() => downloadPdf(report.filename, buildEditableReport(model, report.kind))}
+                onClick={() => {
+                  if (report.kind === "prepartido") {
+                    downloadPdfDocument(report.filename, buildTacticalDossierPdf(model, rivalShots));
+                    return;
+                  }
+                  downloadPdf(report.filename, buildEditableReport(model, report.kind));
+                }}
                 type="button"
               >
                 <strong>{report.title}</strong>
