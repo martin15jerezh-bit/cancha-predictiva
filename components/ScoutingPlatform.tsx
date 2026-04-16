@@ -309,10 +309,13 @@ function SignalList({ title, signals }: { title: string; signals: MatchupScout["
 
 type ShotPeriodFilter = "Todo" | "1" | "2" | "3" | "4";
 type ShotGameFilter = "Todos" | string;
+type ShotPlayerSection = "Amenaza principal" | "Titulares probables" | "Primeros cambios" | "Rotacion 8-9";
 type ShotPlayerCard = {
   name: string;
   role: string;
   tag: string;
+  section: ShotPlayerSection;
+  rank: number;
   player?: MatchupScout["rivalPlayers"][number];
   shots: ShotRow[];
 };
@@ -332,6 +335,57 @@ function personNameTokens(value: string) {
     .filter((token) => token.length > 1);
 }
 
+function personIdentity(value: string) {
+  const cleaned = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9,]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const [surnamePart, givenPart = ""] = cleaned.split(",").map((part) => part.trim());
+  const hasComma = cleaned.includes(",");
+  const normalizedSurnameTokens = personNameTokens(surnamePart);
+  const normalizedGivenTokens = personNameTokens(givenPart);
+
+  if (hasComma) {
+    return {
+      givenInitial: normalizedGivenTokens[0]?.[0] ?? "",
+      surnameTokens: normalizedSurnameTokens,
+      tokens: [...normalizedSurnameTokens, ...normalizedGivenTokens]
+    };
+  }
+
+  const tokens = personNameTokens(value);
+  if (tokens.length === 0) {
+    return { givenInitial: "", surnameTokens: [], tokens: [] };
+  }
+  if (tokens[0].length === 1) {
+    return {
+      givenInitial: tokens[0],
+      surnameTokens: tokens.slice(1),
+      tokens
+    };
+  }
+  if (tokens.length >= 3) {
+    return {
+      givenInitial: tokens[0][0] ?? "",
+      surnameTokens: tokens.slice(1),
+      tokens
+    };
+  }
+  return {
+    givenInitial: "",
+    surnameTokens: tokens,
+    tokens
+  };
+}
+
+function nameCompletenessScore(value: string) {
+  const identity = personIdentity(value);
+  return identity.tokens.reduce((score, token) => score + (token.length > 1 ? 2 : 0), 0) + (value.includes(",") ? 1 : 0);
+}
+
 function sameShotPlayer(playerName: string, shotName: string) {
   const player = normalizePersonName(playerName);
   const shot = normalizePersonName(shotName);
@@ -341,27 +395,41 @@ function sameShotPlayer(playerName: string, shotName: string) {
   if (player === shot || player.includes(shot) || shot.includes(player)) {
     return true;
   }
-  const playerTokens = personNameTokens(playerName);
-  const shotTokens = personNameTokens(shotName);
-  const relevantPlayerTokens = playerTokens.filter((token) => token.length > 2);
-  const relevantShotTokens = shotTokens.filter((token) => token.length > 2);
-  const overlap = relevantPlayerTokens.filter((token) => relevantShotTokens.includes(token));
-  return overlap.length >= 1;
+  const playerIdentity = personIdentity(playerName);
+  const shotIdentity = personIdentity(shotName);
+  const playerSurnames = playerIdentity.surnameTokens.filter((token) => token.length > 2);
+  const shotSurnames = shotIdentity.surnameTokens.filter((token) => token.length > 2);
+  const surnameOverlap = playerSurnames.filter((token) => shotSurnames.includes(token)).length;
+  const initialsCompatible =
+    !playerIdentity.givenInitial || !shotIdentity.givenInitial || playerIdentity.givenInitial === shotIdentity.givenInitial;
+
+  if (Math.min(playerSurnames.length, shotSurnames.length) >= 2) {
+    return surnameOverlap >= 2 && initialsCompatible;
+  }
+
+  return surnameOverlap >= 1 && (initialsCompatible || Math.min(playerSurnames.length, shotSurnames.length) === 1);
 }
 
 function uniqueNames(values: Array<string | undefined>) {
-  const seen = new Set<string>();
-  return values.filter((value): value is string => {
+  const result: string[] = [];
+  values.forEach((value) => {
     if (!value) {
-      return false;
+      return;
     }
     const key = normalizePersonName(value);
-    if (!key || seen.has(key)) {
-      return false;
+    if (!key) {
+      return;
     }
-    seen.add(key);
-    return true;
+    const existingIndex = result.findIndex((item) => sameShotPlayer(item, value));
+    if (existingIndex >= 0) {
+      if (nameCompletenessScore(value) > nameCompletenessScore(result[existingIndex])) {
+        result[existingIndex] = value;
+      }
+      return;
+    }
+    result.push(value);
   });
+  return result;
 }
 
 function roundOne(value: number) {
@@ -581,6 +649,104 @@ function minutesToDecimal(value: string | undefined) {
 
 function formatMinutes(value: number) {
   return `${roundOne(value)} min`;
+}
+
+function firstChangeLabel(index: number) {
+  if (index === 0) {
+    return "1er cambio";
+  }
+  if (index === 1) {
+    return "2do cambio";
+  }
+  return `${index + 1}o cambio`;
+}
+
+function signedDelta(value: number, suffix = "") {
+  if (!Number.isFinite(value)) {
+    return "s/d";
+  }
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${roundOne(value)}${suffix}`;
+}
+
+function trendState(delta: number, threshold = 2) {
+  if (!Number.isFinite(delta)) {
+    return "Sin muestra";
+  }
+  if (delta >= threshold) {
+    return "En alza";
+  }
+  if (delta <= -threshold) {
+    return "En caida";
+  }
+  return "Estable";
+}
+
+function pctFromMadeAttempt(made: number, attempted: number) {
+  return attempted > 0 ? `${Math.round((made / attempted) * 100)}%` : "s/d";
+}
+
+function averagePlayerGameStats(stats: PlayerGameStatRow[]) {
+  const games = Math.max(stats.length, 1);
+  const totals = stats.reduce(
+    (acc, stat) => ({
+      minutes: acc.minutes + minutesToDecimal(stat.minutes),
+      points: acc.points + parseNumber(stat.points),
+      rebounds: acc.rebounds + parseNumber(stat.rebounds),
+      assists: acc.assists + parseNumber(stat.assists),
+      threeMade: acc.threeMade + parseNumber(stat.threeMade),
+      threeAttempted: acc.threeAttempted + parseNumber(stat.threeAttempted)
+    }),
+    { minutes: 0, points: 0, rebounds: 0, assists: 0, threeMade: 0, threeAttempted: 0 }
+  );
+
+  return {
+    games: stats.length,
+    minutes: totals.minutes / games,
+    points: totals.points / games,
+    rebounds: totals.rebounds / games,
+    assists: totals.assists / games,
+    threePct: pctFromMadeAttempt(totals.threeMade, totals.threeAttempted)
+  };
+}
+
+function seasonThreePct(player?: PlayerRow) {
+  if (!player) {
+    return "s/d";
+  }
+  return pctFromMadeAttempt(parseNumber(player.threeMade), parseNumber(player.threeAttempted));
+}
+
+function recentTeamMetrics(scout: MatchupScout["ownTeam"]) {
+  const games = scout.recentGames;
+  if (games.length === 0) {
+    return { points: 0, differential: 0 };
+  }
+  const totals = games.reduce(
+    (acc, game) => {
+      const [ownScore, opponentScore] = game.score.split("-").map((value) => parseNumber(value));
+      return {
+        points: acc.points + ownScore,
+        differential: acc.differential + ownScore - opponentScore
+      };
+    },
+    { points: 0, differential: 0 }
+  );
+
+  return {
+    points: totals.points / games.length,
+    differential: totals.differential / games.length
+  };
+}
+
+function seasonTeamMetrics(team: TeamRow) {
+  const games = Math.max(parseNumber(team.gamesPlayed), 1);
+  return {
+    points: parseNumber(team.pointsFor) / games,
+    rebounds: parseNumber(team.reboundsPerGame),
+    assists: parseNumber(team.assistsPerGame),
+    differential: getPointDifferential(team)
+  };
 }
 
 function replaceLigaDosDataset(current: DatasetMap, official: OfficialSyncPayload): DatasetMap {
@@ -1108,33 +1274,74 @@ export function ScoutingPlatform() {
   };
   const activeRivalShots = filterShotsByGame(rivalShots);
   const activeShotGameCount = activeShotGameFilter === "Todos" ? rivalSampleGames.length : Math.min(rivalSampleGames.length, 1);
-  const rotationShotPlayerNames = uniqueNames([
-    model.rivalPlayers[0]?.name,
-    ...model.rivalRotation.starters,
-    ...model.rivalRotation.coreRotation
-  ]).slice(0, 9);
+  const mainThreatName = model.rivalPlayers[0]?.name;
+  const starterNamesAfterThreat = model.rivalRotation.starters
+    .filter((name) => !mainThreatName || !sameShotPlayer(name, mainThreatName))
+    .slice(0, 4);
+  const firstChangeNames = model.rivalRotation.firstChanges
+    .filter((name) => !mainThreatName || !sameShotPlayer(name, mainThreatName))
+    .filter((name) => !starterNamesAfterThreat.some((starter) => sameShotPlayer(starter, name)));
+  const rotationCandidates = uniqueNames([
+    mainThreatName,
+    ...starterNamesAfterThreat,
+    ...firstChangeNames,
+    ...model.rivalRotation.coreRotation,
+    ...model.rivalPlayers.slice(0, 12).map((player) => player.name)
+  ]);
   const confirmedShotPlayerNames = uniqueNames(rivalShots.map((shot) => shot.playerName))
     .sort((nameA, nameB) => {
       const shotsA = rivalShots.filter((shot) => sameShotPlayer(nameA, shot.playerName)).length;
       const shotsB = rivalShots.filter((shot) => sameShotPlayer(nameB, shot.playerName)).length;
       return shotsB - shotsA;
     })
-    .slice(0, 9);
-  const rotationNamesHaveShots = rotationShotPlayerNames.some((name) => rivalShots.some((shot) => sameShotPlayer(name, shot.playerName)));
-  const shotPlayerNames = rotationNamesHaveShots || confirmedShotPlayerNames.length === 0 ? rotationShotPlayerNames : confirmedShotPlayerNames;
+    .slice(0, 12);
+  const shotPlayerNames = uniqueNames([...rotationCandidates, ...confirmedShotPlayerNames]).slice(0, 9);
   const shotPlayerCards: ShotPlayerCard[] = shotPlayerNames.map((name, index) => {
     const player = model.rivalPlayers.find((item) => sameShotPlayer(item.name, name));
     const playerShots = rivalShots.filter((shot) => sameShotPlayer(name, shot.playerName));
-    const isMainThreat = index === 0;
+    const isMainThreat = Boolean(mainThreatName && sameShotPlayer(name, mainThreatName));
     const isStarter = model.rivalRotation.starters.some((starter) => sameShotPlayer(starter, name));
+    const firstChangeIndex = model.rivalRotation.firstChanges.findIndex((change) => sameShotPlayer(change, name));
+    const isFirstChange = firstChangeIndex >= 0;
+    const section: ShotPlayerSection = isMainThreat
+      ? "Amenaza principal"
+      : isStarter
+        ? "Titulares probables"
+        : isFirstChange
+          ? "Primeros cambios"
+          : "Rotacion 8-9";
     return {
       name,
       player,
       shots: playerShots,
       role: player?.role ?? (isStarter ? "Titular probable" : "Rotacion"),
-      tag: isMainThreat ? "Amenaza principal" : isStarter ? "Titular" : "Rotacion"
+      tag: isMainThreat ? "Amenaza principal" : isStarter ? "Titular" : isFirstChange ? firstChangeLabel(firstChangeIndex) : "Rotacion",
+      section,
+      rank: index + 1
     };
   });
+  const shotPlayerSections = [
+    {
+      title: "Amenaza principal",
+      caption: "Prioridad 1 del plan defensivo",
+      cards: shotPlayerCards.filter((card) => card.section === "Amenaza principal")
+    },
+    {
+      title: "Titulares probables",
+      caption: "Otros 4 del quinteto inicial",
+      cards: shotPlayerCards.filter((card) => card.section === "Titulares probables")
+    },
+    {
+      title: "Primeros cambios",
+      caption: "Orden probable de ingreso desde banca",
+      cards: shotPlayerCards.filter((card) => card.section === "Primeros cambios")
+    },
+    {
+      title: "Rotacion 8-9",
+      caption: "Profundidad que completa la preparacion",
+      cards: shotPlayerCards.filter((card) => card.section === "Rotacion 8-9")
+    }
+  ].filter((section) => section.cards.length > 0);
   const activeShotPlayer = shotPlayerCards.find((player) => player.name === selectedShotPlayer) ?? shotPlayerCards[0];
   const activePlayerShots = activeShotPlayer?.shots ?? [];
   const activeGamePlayerShots = filterShotsByGame(activePlayerShots);
@@ -1145,6 +1352,54 @@ export function ScoutingPlatform() {
   const activeShotSummary = shotSummary(activeGamePlayerShots);
   const filteredShotSummary = shotSummary(filteredShotChart);
   const activeShotAnalysis = buildShotAnalysis(activeShotPlayer?.name ?? "Jugador rival", activeGamePlayerShots);
+  const activePlayerStats = filterStatsByGame(
+    rivalPlayerGameStats.filter((stat) => activeShotPlayer?.name && sameShotPlayer(activeShotPlayer.name, stat.name))
+  );
+  const activeRecentStats = averagePlayerGameStats(activePlayerStats);
+  const activeBasePlayerRow = competitionPlayers.find((player) => activeShotPlayer?.name && sameShotPlayer(player.name, activeShotPlayer.name));
+  const activeBasePlayer = activeShotPlayer?.player;
+  const activeTrendRows = [
+    {
+      label: "PTS/PJ",
+      recent: activeRecentStats.games > 0 ? activeRecentStats.points : activeBasePlayer?.points ?? 0,
+      base: activeBasePlayer?.points ?? 0,
+      suffix: ""
+    },
+    {
+      label: "MIN/PJ",
+      recent: activeRecentStats.games > 0 ? activeRecentStats.minutes : activeBasePlayer?.minutes ?? 0,
+      base: activeBasePlayer?.minutes ?? 0,
+      suffix: ""
+    },
+    {
+      label: "REB/PJ",
+      recent: activeRecentStats.games > 0 ? activeRecentStats.rebounds : activeBasePlayer?.rebounds ?? 0,
+      base: activeBasePlayer?.rebounds ?? 0,
+      suffix: ""
+    },
+    {
+      label: "AST/PJ",
+      recent: activeRecentStats.games > 0 ? activeRecentStats.assists : activeBasePlayer?.assists ?? 0,
+      base: activeBasePlayer?.assists ?? 0,
+      suffix: ""
+    }
+  ];
+  const activePointsDelta = activeTrendRows[0].recent - activeTrendRows[0].base;
+  const activeTrendLabel = trendState(activePointsDelta, 3);
+  const playerScoutingSections = shotPlayerSections.map((section) => ({
+    ...section,
+    players: section.cards
+      .map((card) => model.rivalPlayers.find((player) => sameShotPlayer(player.name, card.name)))
+      .filter((player): player is MatchupScout["rivalPlayers"][number] => Boolean(player))
+  })).filter((section) => section.players.length > 0);
+  const ownRecentComparison = recentTeamMetrics(model.ownTeam);
+  const rivalRecentComparison = recentTeamMetrics(model.rivalTeam);
+  const ownSeasonComparison = seasonTeamMetrics(model.ownTeam.team);
+  const rivalSeasonComparison = seasonTeamMetrics(model.rivalTeam.team);
+  const comparisonDecision =
+    ownRecentComparison.points - ownSeasonComparison.points >= rivalRecentComparison.points - rivalSeasonComparison.points
+      ? "Nuestra forma reciente esta por sobre la base: sostener ritmo, pero asegurar seleccion de tiro si el partido se traba."
+      : "El rival llega con mejor impulso relativo: bajar posesiones faciles y forzar ejecuciones largas desde el inicio.";
   const storedShotCount = data.shots?.length ?? 0;
   const shotEmptyCopy =
     storedShotCount === 0
@@ -1431,7 +1686,37 @@ export function ScoutingPlatform() {
             <p className="eyebrow">Scouting individual</p>
             <h3>Jugadores de impacto rival</h3>
           </div>
-          <div className="table-shell premium-table">
+          <div className="player-scout-sections">
+            {playerScoutingSections.map((section) => (
+              <section className="player-scout-section" key={section.title}>
+                <div className="player-section-heading">
+                  <span>{section.title}</span>
+                  <small>{section.caption}</small>
+                </div>
+                <div className="player-scout-card-grid">
+                  {section.players.map((player) => (
+                    <article className={section.title === "Amenaza principal" ? "player-scout-card featured" : "player-scout-card"} key={player.name}>
+                      <header>
+                        <strong>{player.name}</strong>
+                        <span>{player.role}</span>
+                      </header>
+                      <p>{player.defensiveKey}</p>
+                      <div>
+                        <small>MIN/PJ <b>{player.minutes}</b></small>
+                        <small>PTS/PJ <b>{player.points}</b></small>
+                        <small>REB/PJ <b>{player.rebounds}</b></small>
+                        <small>AST/PJ <b>{player.assists}</b></small>
+                      </div>
+                      <em>{player.playerType} · {player.trend}</em>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+          <details className="player-detail-table">
+            <summary>Detalle tecnico completo</summary>
+            <div className="table-shell premium-table">
             <table>
               <thead>
                 <tr>
@@ -1477,6 +1762,7 @@ export function ScoutingPlatform() {
               </tbody>
             </table>
           </div>
+          </details>
         </section>
       ) : null}
 
@@ -1542,7 +1828,7 @@ export function ScoutingPlatform() {
                 <p className="eyebrow">Carta de tiro rival · {model.rivalTeam.team.name}</p>
                 <h3>Mapa de {model.rivalTeam.team.name}</h3>
                 <p className="heading-copy">
-                  Rival analizado contra {model.ownTeam.team.name}. Ordenado por amenaza principal, titulares probables y rotacion de 9 jugadores.
+                  Rival analizado contra {model.ownTeam.team.name}. Ordenado por amenaza principal, otros 4 titulares, primeros cambios y rotacion de 9.
                 </p>
               </div>
               <div className="shot-actions">
@@ -1582,19 +1868,27 @@ export function ScoutingPlatform() {
                 <h3>Prioridad defensiva</h3>
               </div>
               <div className="shot-player-list">
-                {shotPlayerCards.map((card, index) => {
-                  const summary = shotSummary(filterShotsByGame(card.shots));
-                  const active = activeShotPlayer?.name === card.name;
-                  return (
-                    <button className={active ? "active" : ""} key={card.name} onClick={() => setSelectedShotPlayer(card.name)} type="button">
-                      <span>{index + 1}</span>
-                      <strong>{card.name}</strong>
-                      <small>{card.tag} · {card.role}</small>
-                      <b>{summary.attempts} tiros · {summary.efficiency}</b>
-                      <em>{playerMinutesLabel(card.name, card.player)}</em>
-                    </button>
-                  );
-                })}
+                {shotPlayerSections.map((section) => (
+                  <div className="shot-player-section" key={section.title}>
+                    <div className="shot-section-header">
+                      <span>{section.title}</span>
+                      <small>{section.caption}</small>
+                    </div>
+                    {section.cards.map((card) => {
+                      const summary = shotSummary(filterShotsByGame(card.shots));
+                      const active = activeShotPlayer?.name === card.name;
+                      return (
+                        <button className={active ? "active" : ""} key={card.name} onClick={() => setSelectedShotPlayer(card.name)} type="button">
+                          <span>{card.rank}</span>
+                          <strong>{card.name}</strong>
+                          <small>{card.tag} · {card.role}</small>
+                          <b>{summary.attempts} tiros · {summary.efficiency}</b>
+                          <em>{playerMinutesLabel(card.name, card.player)}</em>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
               <details className="shot-trace">
                 <summary>Partidos y confiabilidad</summary>
@@ -1641,6 +1935,31 @@ export function ScoutingPlatform() {
                 <span><i className="legend-made" /> Convertido</span>
                 <span><i className="legend-miss" /> Fallado</span>
                 <strong>{filteredShotSummary.attempts} tiros visibles · {filteredShotSummary.efficiency}</strong>
+              </div>
+              <div className="shot-trend-card">
+                <header>
+                  <span>Tendencia vs base</span>
+                  <strong>{activeTrendLabel}</strong>
+                  <small>
+                    Forma muestra {activeRecentStats.games || activeShotGameCount} PJ · Base temporada · 3PT {activeRecentStats.threePct} vs {seasonThreePct(activeBasePlayerRow)}
+                  </small>
+                </header>
+                <div className="trend-metric-grid">
+                  {activeTrendRows.map((metric) => (
+                    <article key={metric.label}>
+                      <span>{metric.label}</span>
+                      <strong>{roundOne(metric.recent)}</strong>
+                      <small>Base {roundOne(metric.base)} · {signedDelta(metric.recent - metric.base, metric.suffix)}</small>
+                    </article>
+                  ))}
+                </div>
+                <p>
+                  {activeTrendLabel === "En alza"
+                    ? "Volumen reciente sobre su base: subir prioridad defensiva y negar primeros tiros comodos."
+                    : activeTrendLabel === "En caida"
+                      ? "Produccion reciente bajo su base: mantener scouting, pero no sobrerreaccionar si baja volumen."
+                      : "La muestra reciente confirma su base: plan confiable para preparar matchup."}
+                </p>
               </div>
               {activeGamePlayerShots.length === 0 ? (
                 <div className="shot-empty-state">
@@ -1716,26 +2035,62 @@ export function ScoutingPlatform() {
       ) : null}
 
       {tab === "Comparativo" ? (
-        <section className="two-column">
-          <SignalList title="Rival vs propio equipo" signals={model.comparison} />
-          <section className="module-panel">
-            <div className="module-heading">
-              <p className="eyebrow">Prediccion</p>
+        <section className="comparison-page">
+          <section className="comparison-board">
+            <article className="comparison-team-card own">
+              <span>Equipo propio</span>
+              <h3>{model.ownTeam.team.name}</h3>
+              <div className="comparison-stat-lines">
+                <p><b>Forma</b><strong>{roundOne(ownRecentComparison.points)}</strong><small>PTS/PJ · DIF {signedDelta(ownRecentComparison.differential)}</small></p>
+                <p><b>Base</b><strong>{roundOne(ownSeasonComparison.points)}</strong><small>PTS/PJ · DIF {signedDelta(ownSeasonComparison.differential)}</small></p>
+                <p><b>Soporte</b><strong>{roundOne(ownSeasonComparison.rebounds)}</strong><small>REB/PJ · {roundOne(ownSeasonComparison.assists)} AST/PJ</small></p>
+              </div>
+            </article>
+            <article className="comparison-decision-card">
+              <span>Tendencia vs base</span>
               <h3>{model.prediction.ownWinProbability}% victoria propia</h3>
-            </div>
-            <div className="prediction-bars">
-              <div>
-                <span>{model.ownTeam.team.name}</span>
-                <strong>{model.prediction.ownWinProbability}%</strong>
-                <i style={{ width: `${model.prediction.ownWinProbability}%` }} />
+              <p>{comparisonDecision}</p>
+              <div className="prediction-bars">
+                <div>
+                  <span>{model.ownTeam.team.name}</span>
+                  <strong>{model.prediction.ownWinProbability}%</strong>
+                  <i style={{ width: `${model.prediction.ownWinProbability}%` }} />
+                </div>
+                <div>
+                  <span>{model.rivalTeam.team.name}</span>
+                  <strong>{model.prediction.rivalWinProbability}%</strong>
+                  <i style={{ width: `${model.prediction.rivalWinProbability}%` }} />
+                </div>
               </div>
-              <div>
-                <span>{model.rivalTeam.team.name}</span>
-                <strong>{model.prediction.rivalWinProbability}%</strong>
-                <i style={{ width: `${model.prediction.rivalWinProbability}%` }} />
+              <small>Margen esperado {model.prediction.marginRange}. {model.prediction.trend}</small>
+            </article>
+            <article className="comparison-team-card rival">
+              <span>Rival</span>
+              <h3>{model.rivalTeam.team.name}</h3>
+              <div className="comparison-stat-lines">
+                <p><b>Forma</b><strong>{roundOne(rivalRecentComparison.points)}</strong><small>PTS/PJ · DIF {signedDelta(rivalRecentComparison.differential)}</small></p>
+                <p><b>Base</b><strong>{roundOne(rivalSeasonComparison.points)}</strong><small>PTS/PJ · DIF {signedDelta(rivalSeasonComparison.differential)}</small></p>
+                <p><b>Soporte</b><strong>{roundOne(rivalSeasonComparison.rebounds)}</strong><small>REB/PJ · {roundOne(rivalSeasonComparison.assists)} AST/PJ</small></p>
               </div>
-            </div>
-            <p className="status-copy">Margen esperado {model.prediction.marginRange}. {model.prediction.trend}</p>
+            </article>
+          </section>
+          <section className="comparison-insight-grid">
+            <SignalList title="Rival vs propio equipo" signals={model.comparison} />
+            <section className="module-panel">
+              <div className="module-heading">
+                <p className="eyebrow">Decision del plan</p>
+                <h3>Donde cargar el partido</h3>
+              </div>
+              <div className="key-list">
+                {model.tacticalKeysCore.slice(0, 3).map((key) => (
+                  <article key={key.title}>
+                    <strong>{key.title}</strong>
+                    <p>{key.action}</p>
+                    <small>{key.trigger}</small>
+                  </article>
+                ))}
+              </div>
+            </section>
           </section>
           <section className="module-panel">
             <div className="module-heading">
