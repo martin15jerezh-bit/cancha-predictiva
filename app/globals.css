@@ -1823,6 +1823,293 @@ input {
   line-height: 1.2;
 }
 
+.shot-module,
+.shot-layout,
+.shot-summary-strip,
+.shot-player-list,
+.shot-analysis-list,
+.half-split {
+  display: grid;
+  gap: 12px;
+}
+
+.shot-header-panel .module-heading {
+  align-items: center;
+}
+
+.shot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.shot-header-panel .primary-button:disabled,
+.shot-header-panel .secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.shot-summary-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shot-status {
+  margin: 0;
+  border: 1px solid rgba(22, 31, 27, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #4f5d56;
+  background: #fbfdfc;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.shot-layout {
+  grid-template-columns: 290px minmax(0, 1fr) 310px;
+  align-items: start;
+}
+
+.shot-player-list button {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 3px 9px;
+  width: 100%;
+  min-height: 76px;
+  border: 1px solid rgba(22, 31, 27, 0.1);
+  border-radius: 8px;
+  padding: 10px;
+  color: #202722;
+  background: #fbfdfc;
+  text-align: left;
+}
+
+.shot-player-list button.active {
+  border-color: color-mix(in srgb, var(--team-primary, #0f766e) 36%, rgba(22, 31, 27, 0.12));
+  background: var(--team-soft, #dff7f1);
+}
+
+.shot-player-list button > span {
+  grid-row: span 3;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--team-primary, #0f766e);
+  background: #ffffff;
+  font-weight: 900;
+}
+
+.shot-player-list strong,
+.shot-player-list small,
+.shot-player-list b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shot-player-list strong {
+  color: #151916;
+  font-size: 0.95rem;
+}
+
+.shot-player-list small {
+  color: #64716b;
+  font-size: 0.78rem;
+}
+
+.shot-player-list b {
+  color: #33413a;
+  font-size: 0.82rem;
+}
+
+.shot-trace {
+  border-top: 1px solid rgba(22, 31, 27, 0.08);
+  padding-top: 10px;
+  color: #64716b;
+  font-size: 0.84rem;
+}
+
+.shot-trace summary {
+  cursor: pointer;
+  color: #33413a;
+  font-weight: 800;
+}
+
+.shot-filter {
+  display: grid;
+  gap: 5px;
+  min-width: 120px;
+  color: #64716b;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.shot-court {
+  overflow: hidden;
+  border: 1px solid rgba(22, 31, 27, 0.12);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(22, 31, 27, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, #f8fbf9, #eef5f1);
+  background-size: 28px 28px, auto;
+}
+
+.shot-court svg {
+  display: block;
+  width: 100%;
+  min-height: 420px;
+}
+
+.court-bg {
+  fill: rgba(255, 255, 255, 0.7);
+  stroke: rgba(22, 31, 27, 0.26);
+  stroke-width: 0.35;
+}
+
+.court-line,
+.court-line-fill {
+  fill: none;
+  stroke: rgba(22, 31, 27, 0.28);
+  stroke-width: 0.45;
+}
+
+.shot-dot.made {
+  fill: var(--team-primary, #0f766e);
+  stroke: #ffffff;
+  stroke-width: 0.35;
+}
+
+.shot-miss line {
+  stroke: #be123c;
+  stroke-linecap: round;
+  stroke-width: 0.62;
+}
+
+.shot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 10px;
+  color: #64716b;
+  font-size: 0.86rem;
+}
+
+.shot-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shot-legend strong {
+  margin-left: auto;
+  color: #33413a;
+}
+
+.legend-made,
+.legend-miss {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+}
+
+.legend-made {
+  border-radius: 999px;
+  background: var(--team-primary, #0f766e);
+}
+
+.legend-miss {
+  position: relative;
+}
+
+.legend-miss::before,
+.legend-miss::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 0;
+  width: 13px;
+  height: 2px;
+  border-radius: 999px;
+  background: #be123c;
+}
+
+.legend-miss::before {
+  transform: rotate(45deg);
+}
+
+.legend-miss::after {
+  transform: rotate(-45deg);
+}
+
+.shot-empty-state {
+  margin-top: 12px;
+  border: 1px dashed rgba(22, 31, 27, 0.18);
+  border-radius: 8px;
+  padding: 12px;
+  color: #64716b;
+  background: #fbfdfc;
+}
+
+.shot-empty-state p,
+.shot-analysis-list p,
+.defense-plan p,
+.player-mode-shot p {
+  margin: 0;
+}
+
+.shot-analysis-list p,
+.defense-plan,
+.player-mode-shot {
+  border: 1px solid rgba(22, 31, 27, 0.09);
+  border-radius: 8px;
+  padding: 10px;
+  color: #33413a;
+  background: #fbfdfc;
+  line-height: 1.35;
+}
+
+.half-split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.half-split article {
+  border: 1px solid rgba(22, 31, 27, 0.09);
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.half-split span,
+.defense-plan span,
+.player-mode-shot span {
+  display: block;
+  margin-bottom: 6px;
+  color: #64716b;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.half-split strong {
+  display: block;
+  color: #151916;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.half-split small {
+  color: #64716b;
+}
+
+.defense-plan {
+  border-color: color-mix(in srgb, var(--team-primary, #0f766e) 24%, rgba(22, 31, 27, 0.1));
+  background: var(--team-soft, #dff7f1);
+}
+
 .decision-room {
   grid-column: 1 / -1;
 }
@@ -2129,6 +2416,21 @@ input {
     grid-template-columns: 1fr;
   }
 
+  .dashboard-main-row,
+  .dashboard-main-row-balanced,
+  .shot-layout,
+  .shot-summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid .decision-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .shot-court svg {
+    min-height: 320px;
+  }
+
   .rotation-pair {
     grid-template-columns: 1fr;
   }
@@ -2150,6 +2452,12 @@ input {
 }
 
 @media (max-width: 720px) {
+  .dashboard-card-pair,
+  .dashboard-grid .decision-grid,
+  .dashboard-grid .identity-grid {
+    grid-template-columns: 1fr;
+  }
+
   .player-stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2160,5 +2468,14 @@ input {
 
   .recent-game-row small {
     display: none;
+  }
+
+  .half-split {
+    grid-template-columns: 1fr;
+  }
+
+  .shot-legend strong {
+    width: 100%;
+    margin-left: 0;
   }
 }

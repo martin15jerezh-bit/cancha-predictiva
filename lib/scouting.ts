@@ -221,6 +221,7 @@ export const databaseTables = [
   "team_game_stats",
   "player_game_stats",
   "quarter_stats",
+  "shot_events",
   "inferred_rotations",
   "reports",
   "presentations",

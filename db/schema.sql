@@ -142,6 +142,24 @@ create table quarter_stats (
   unique (game_id, team_id, quarter)
 );
 
+create table shot_events (
+  id uuid primary key default gen_random_uuid(),
+  game_id uuid not null references games(id),
+  team_id uuid not null references teams(id),
+  player_id uuid references players(id),
+  external_action_id text,
+  period integer not null check (period between 1 and 4),
+  action_type text not null,
+  sub_type text,
+  made boolean not null,
+  x numeric(6,3) not null,
+  y numeric(6,3) not null,
+  source_url text,
+  evidence_level text not null default 'confirmed',
+  created_at timestamptz not null default now(),
+  unique (game_id, external_action_id, team_id)
+);
+
 create table inferred_rotations (
   id uuid primary key default gen_random_uuid(),
   team_id uuid not null references teams(id),

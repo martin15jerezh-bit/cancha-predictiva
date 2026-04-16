@@ -1,4 +1,4 @@
-import { BoxscoreImport, CompetitionKey, DatasetMap, GameRow, PlayerRow, PredictionResult, TeamRow } from "@/lib/types";
+import { BoxscoreImport, CompetitionKey, DatasetMap, GameRow, PlayerRow, PredictionResult, ShotRow, TeamRow } from "@/lib/types";
 
 export const CURRENT_COMPETITION: CompetitionKey = "Liga Chery Apertura 2026";
 export const LIGA_DOS_COMPETITION: CompetitionKey = "Liga DOS 2026";
@@ -940,6 +940,7 @@ const gameSeeds: Omit<GameRow, "gameId">[] = [
 export const seedData: DatasetMap = {
   teams: [...teamSeeds, ...ligaDosTeamSeeds, ...lnfTeamSeeds],
   players: [...playerSeeds, ...boxscorePlayerSeeds],
+  shots: [],
   games: [
     ...gameSeeds,
     {
@@ -1189,11 +1190,17 @@ function mergeRowsByKey<T>(current: T[], incoming: T[], getKey: (row: T) => stri
 export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]): DatasetMap {
   const importedGames = imports.map((item) => item.game);
   const importedPlayers = imports.flatMap((item) => item.players);
+  const importedShots = imports.flatMap((item) => item.shots ?? []);
   const games = mergeRowsByKey(data.games, importedGames, (game) => `${game.date}-${game.homeTeam}-${game.awayTeam}`);
   const players = mergeRowsByKey(
     data.players,
     importedPlayers,
     (player) => `${player.teamName}-${player.name}`
+  );
+  const shots = mergeRowsByKey<ShotRow>(
+    data.shots ?? [],
+    importedShots,
+    (shot) => shot.shotId
   );
 
   const importedTeamNames = imports.flatMap((item) => [
@@ -1278,6 +1285,7 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
   return {
     teams: teamTotals,
     players,
-    games: resolvedImportedGames
+    games: resolvedImportedGames,
+    shots
   };
 }

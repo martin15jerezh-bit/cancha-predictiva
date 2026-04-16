@@ -13,8 +13,8 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { applyBoxscoreImports, getPointDifferential, LIGA_DOS_COMPETITION, parseNumber, seedData } from "@/lib/data";
-import { BoxscoreImport, CompetitionKey, DatasetMap, GameRow, PlayerRow, TeamRow } from "@/lib/types";
+import { applyBoxscoreImports, areSameTeam, getPointDifferential, LIGA_DOS_COMPETITION, parseNumber, seedData } from "@/lib/data";
+import { BoxscoreImport, CompetitionKey, DatasetMap, GameRow, PlayerRow, ShotRow, TeamRow } from "@/lib/types";
 import {
   buildEditableReport,
   buildScoutingModel,
@@ -35,6 +35,7 @@ const tabs = [
   "Equipos",
   "Jugadores",
   "Rotacion",
+  "Carta de tiro",
   "Cuartos",
   "Comparativo",
   "Informes",
@@ -306,6 +307,235 @@ function SignalList({ title, signals }: { title: string; signals: MatchupScout["
   );
 }
 
+type ShotPeriodFilter = "Todo" | "1" | "2" | "3" | "4";
+type ShotPlayerCard = {
+  name: string;
+  role: string;
+  tag: string;
+  player?: MatchupScout["rivalPlayers"][number];
+  shots: ShotRow[];
+};
+
+function normalizePersonName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function personNameTokens(value: string) {
+  return normalizePersonName(value)
+    .split(" ")
+    .filter((token) => token.length > 1);
+}
+
+function sameShotPlayer(playerName: string, shotName: string) {
+  const player = normalizePersonName(playerName);
+  const shot = normalizePersonName(shotName);
+  if (!player || !shot) {
+    return false;
+  }
+  if (player === shot || player.includes(shot) || shot.includes(player)) {
+    return true;
+  }
+  const playerTokens = personNameTokens(playerName);
+  const shotTokens = personNameTokens(shotName);
+  const relevantPlayerTokens = playerTokens.filter((token) => token.length > 2);
+  const relevantShotTokens = shotTokens.filter((token) => token.length > 2);
+  const overlap = relevantPlayerTokens.filter((token) => relevantShotTokens.includes(token));
+  return overlap.length >= 1;
+}
+
+function uniqueNames(values: Array<string | undefined>) {
+  const seen = new Set<string>();
+  return values.filter((value): value is string => {
+    if (!value) {
+      return false;
+    }
+    const key = normalizePersonName(value);
+    if (!key || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function roundOne(value: number) {
+  const rounded = Number(value.toFixed(1));
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+
+function percentText(made: number, attempts: number) {
+  return attempts > 0 ? `${Math.round((made / attempts) * 100)}%` : "s/d";
+}
+
+function clampPoint(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function shotPoint(shot: ShotRow) {
+  return {
+    x: clampPoint(shot.x, 3, 97),
+    y: clampPoint((shot.y / 100) * 56, 3, 53)
+  };
+}
+
+function shotZone(shot: ShotRow) {
+  const lane = shot.y >= 34 && shot.y <= 66;
+  const deepPaint = shot.x <= 18 || shot.x >= 82;
+  if (shot.actionType === "3pt") {
+    if ((shot.x <= 16 || shot.x >= 84) && (shot.y <= 22 || shot.y >= 78)) {
+      return "esquina";
+    }
+    return "triple frontal/45";
+  }
+  if (deepPaint && lane) {
+    return "pintura";
+  }
+  if (shot.y < 35) {
+    return "costado izquierdo";
+  }
+  if (shot.y > 65) {
+    return "costado derecho";
+  }
+  return "media distancia";
+}
+
+function shotSide(shot: ShotRow) {
+  if (shot.y < 35) {
+    return "lado izquierdo";
+  }
+  if (shot.y > 65) {
+    return "lado derecho";
+  }
+  return "eje central";
+}
+
+function shotSummary(shots: ShotRow[]) {
+  const attempts = shots.length;
+  const made = shots.filter((shot) => shot.made).length;
+  const threes = shots.filter((shot) => shot.actionType === "3pt");
+  const firstHalf = shots.filter((shot) => shot.period <= 2);
+  const secondHalf = shots.filter((shot) => shot.period >= 3);
+  const zones = new Map<string, number>();
+  const sides = new Map<string, number>();
+  const quarters = new Map<number, number>();
+  shots.forEach((shot) => {
+    zones.set(shotZone(shot), (zones.get(shotZone(shot)) ?? 0) + 1);
+    sides.set(shotSide(shot), (sides.get(shotSide(shot)) ?? 0) + 1);
+    quarters.set(shot.period, (quarters.get(shot.period) ?? 0) + 1);
+  });
+  const topZone = [...zones.entries()].sort((a, b) => b[1] - a[1])[0];
+  const topSide = [...sides.entries()].sort((a, b) => b[1] - a[1])[0];
+  const topQuarter = [...quarters.entries()].sort((a, b) => b[1] - a[1])[0];
+
+  return {
+    attempts,
+    made,
+    efficiency: percentText(made, attempts),
+    threeAttempts: threes.length,
+    threeMade: threes.filter((shot) => shot.made).length,
+    firstHalfAttempts: firstHalf.length,
+    secondHalfAttempts: secondHalf.length,
+    topZone: topZone?.[0] ?? "sin zona dominante",
+    topZoneCount: topZone?.[1] ?? 0,
+    topSide: topSide?.[0] ?? "sin lado dominante",
+    topQuarter: topQuarter?.[0] ? `${topQuarter[0]}C` : "s/d",
+    topQuarterAttempts: topQuarter?.[1] ?? 0
+  };
+}
+
+function buildShotAnalysis(playerName: string, shots: ShotRow[]) {
+  const summary = shotSummary(shots);
+  if (summary.attempts === 0) {
+    return {
+      headline: "Sin carta de tiro confirmada para este jugador en la muestra.",
+      bullets: [
+        "Reimporta el link de Estadisticas completas para capturar la pestana Carta de tiro.",
+        "Cuando existan coordenadas, el sistema mostrara zonas, cuartos y plan defensivo."
+      ],
+      plan: "Plan provisorio: defender segun scouting estadistico y validar con video."
+    };
+  }
+
+  const pressure =
+    summary.secondHalfAttempts > summary.firstHalfAttempts
+      ? "aumenta volumen en segunda mitad"
+      : summary.firstHalfAttempts > summary.secondHalfAttempts
+        ? "carga mas tiros en primera mitad"
+        : "reparte volumen entre mitades";
+  const plan =
+    summary.threeAttempts >= summary.attempts * 0.45
+      ? "Pasar por arriba en bloqueos, negar catch and shoot y cerrar con mano alta."
+      : summary.topZone === "pintura"
+        ? "Cerrar primera linea, cargar ayuda corta y obligarlo a finalizar lejos del aro."
+        : "Orientarlo fuera de su zona dominante y conceder tiros de menor eficiencia.";
+
+  return {
+    headline: `${playerName} concentra ${summary.topZoneCount}/${summary.attempts} tiros en ${summary.topZone} y ${pressure}.`,
+    bullets: [
+      `Volumen: ${summary.attempts} tiros en la muestra, ${summary.efficiency} de acierto.`,
+      `Mayor carga por cuarto: ${summary.topQuarter} con ${summary.topQuarterAttempts} tiros.`,
+      `Tendencia espacial: ${summary.topSide}; triples ${summary.threeMade}/${summary.threeAttempts}.`
+    ],
+    plan
+  };
+}
+
+function shotPlanText(playerName: string, shots: ShotRow[]) {
+  const analysis = buildShotAnalysis(playerName, shots);
+  const summary = shotSummary(shots);
+  return [
+    `Carta de tiro - ${playerName}`,
+    "",
+    `Tiros registrados: ${summary.attempts}`,
+    `Acierto: ${summary.efficiency}`,
+    `Zona dominante: ${summary.topZone}`,
+    `Cuarto de mayor volumen: ${summary.topQuarter}`,
+    "",
+    "Lectura staff",
+    analysis.headline,
+    ...analysis.bullets.map((item) => `- ${item}`),
+    "",
+    "Plan defensivo",
+    `- ${analysis.plan}`,
+    "- Comunicar la regla en una frase simple al jugador asignado.",
+    "- Validar con video si el rival cambia volumen entre primera y segunda mitad."
+  ].join("\n");
+}
+
+function ShotCourt({ shots }: { shots: ShotRow[] }) {
+  return (
+    <div className="shot-court">
+      <svg aria-label="Carta de tiro" role="img" viewBox="0 0 100 56">
+        <rect className="court-bg" x="1" y="1" width="98" height="54" rx="2" />
+        <line className="court-line" x1="50" y1="1" x2="50" y2="55" />
+        <circle className="court-line-fill" cx="50" cy="28" r="6.5" />
+        <rect className="court-line-fill" x="1" y="17" width="17" height="22" />
+        <rect className="court-line-fill" x="82" y="17" width="17" height="22" />
+        <circle className="court-line-fill" cx="9" cy="28" r="2.2" />
+        <circle className="court-line-fill" cx="91" cy="28" r="2.2" />
+        <path className="court-line-fill" d="M1 7 C18 9 24 18 24 28 C24 38 18 47 1 49" />
+        <path className="court-line-fill" d="M99 7 C82 9 76 18 76 28 C76 38 82 47 99 49" />
+        {shots.map((shot) => {
+          const point = shotPoint(shot);
+          return shot.made ? (
+            <circle className="shot-dot made" cx={point.x} cy={point.y} key={shot.shotId} r="1.25" />
+          ) : (
+            <g className="shot-miss" key={shot.shotId}>
+              <line x1={point.x - 1.25} y1={point.y - 1.25} x2={point.x + 1.25} y2={point.y + 1.25} />
+              <line x1={point.x + 1.25} y1={point.y - 1.25} x2={point.x - 1.25} y2={point.y + 1.25} />
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 function isUploadedGame(gameId: string, notes: string) {
   return notes.toLowerCase().includes("importado desde fiba");
 }
@@ -316,6 +546,19 @@ function fixtureKey(game: GameRow) {
 
 function matchIdFromGame(game: GameRow) {
   return game.gameId.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1] ?? game.notes.match(/(?:FIBA|Genius)\s+(\d+)/)?.[1];
+}
+
+function matchIdFromShot(shot: ShotRow) {
+  return (
+    shot.gameId.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1] ??
+    shot.sourceUrl.match(/\/data\/(\d+)/)?.[1] ??
+    shot.sourceUrl.match(/\/u\/[^/]+\/(\d+)/)?.[1]
+  );
+}
+
+function dataUrlFromGame(game: GameRow) {
+  const matchId = matchIdFromGame(game);
+  return matchId ? `https://fibalivestats.dcd.shared.geniussports.com/data/${matchId}/data.json` : null;
 }
 
 function replaceLigaDosDataset(current: DatasetMap, official: OfficialSyncPayload): DatasetMap {
@@ -353,7 +596,8 @@ function replaceLigaDosDataset(current: DatasetMap, official: OfficialSyncPayloa
       ...current.games.filter((game) => game.competition !== LIGA_DOS_COMPETITION),
       ...mergedOfficialGames,
       ...preservedImportedGames
-    ]
+    ],
+    shots: current.shots ?? []
   };
 }
 
@@ -361,7 +605,7 @@ function migrateStoredDataset(current: DatasetMap): DatasetMap {
   const hasOfficialSync = current.teams.some((team) => team.competition === LIGA_DOS_COMPETITION && team.teamId.startsWith("GENIUS-"));
 
   if (hasOfficialSync) {
-    return current;
+    return { ...current, shots: current.shots ?? [] };
   }
 
   const seedLigaTeams = seedData.teams.filter((team) => team.competition === LIGA_DOS_COMPETITION);
@@ -383,7 +627,8 @@ function migrateStoredDataset(current: DatasetMap): DatasetMap {
       ...current.games.filter((game) => game.competition !== LIGA_DOS_COMPETITION),
       ...seedLigaGames.filter((game) => !importedKeys.has(fixtureKey(game))),
       ...importedGames
-    ]
+    ],
+    shots: current.shots ?? []
   };
 }
 
@@ -502,9 +747,13 @@ export function ScoutingPlatform() {
   const [rivalTeam, setRivalTeam] = useState("Illapel Basquetbol");
   const [range, setRange] = useState<RangeKey>("Ultimos 5 partidos");
   const [locality, setLocality] = useState<LocalityKey>("Local y visita");
+  const [selectedShotPlayer, setSelectedShotPlayer] = useState("");
+  const [shotPeriod, setShotPeriod] = useState<ShotPeriodFilter>("Todo");
   const [urls, setUrls] = useState("");
   const [ingestStatus, setIngestStatus] = useState("Listo para pegar links FEBACHILE / Genius Sports.");
   const [officialSyncStatus, setOfficialSyncStatus] = useState("Base oficial lista para sincronizar standings, equipos, rosters y fixture.");
+  const [shotImportStatus, setShotImportStatus] = useState("Carta de tiro lista para generar desde los partidos oficiales del rival.");
+  const [isShotImporting, setIsShotImporting] = useState(false);
   const [notes, setNotes] = useState<PrivateNote[]>([]);
   const [noteForm, setNoteForm] = useState({ scope: "rival" as NoteScope, title: "", body: "" });
   const [storageReady, setStorageReady] = useState(false);
@@ -585,7 +834,7 @@ export function ScoutingPlatform() {
           loadedAt: now,
           loadedBy: "Admin Liga DOS",
           status: "procesado" as const,
-          confirmedFields: ["equipos", "marcador", "jugadores", "minutos", "puntos", "rebotes", "asistencias"],
+          confirmedFields: ["equipos", "marcador", "jugadores", "minutos", "puntos", "rebotes", "asistencias", "carta de tiro"],
           inferredFields: ["rol estimado", "rotacion probable", "cuartos proyectados", "amenaza rival"],
           manualCorrections: []
         })),
@@ -593,11 +842,73 @@ export function ScoutingPlatform() {
       ]);
     }
 
+    const shotEventsImported = payload.imports.reduce((total, item) => total + (item.shots?.length ?? 0), 0);
     setIngestStatus(
-      `Procesados ${payload.imports.length} links. ${
+      `Procesados ${payload.imports.length} links · ${shotEventsImported} tiros de Carta de tiro capturados. ${
         payload.errors.length > 0 ? `Observaciones: ${payload.errors.join(" | ")}` : "Datos persistidos en la base local del MVP."
       }`
     );
+  };
+
+  const handleShotAutoImport = async () => {
+    if (!model) {
+      setShotImportStatus("Falta seleccionar equipo propio y rival antes de capturar la carta de tiro.");
+      return;
+    }
+
+    const rivalName = model.rivalTeam.team.name;
+    const targetUrls = Array.from(new Set(rivalSampleGames.map(dataUrlFromGame).filter((url): url is string => Boolean(url))));
+
+    if (targetUrls.length === 0) {
+      setShotImportStatus("No encontre IDs oficiales en la muestra. Primero sincroniza Liga DOS oficial o pega links de Estadisticas completas en Carga.");
+      return;
+    }
+
+    setIsShotImporting(true);
+    setShotImportStatus(`Capturando carta de tiro de ${rivalName} desde ${targetUrls.length} partidos oficiales...`);
+
+    try {
+      const response = await fetch("/api/import-boxscores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ urls: targetUrls, competition })
+      });
+      const payload = (await response.json()) as { imports: BoxscoreImport[]; errors: string[] };
+
+      if (!response.ok) {
+        setShotImportStatus(payload.errors?.join(" | ") || "No se pudo capturar la carta de tiro desde Genius/FIBA.");
+        return;
+      }
+
+      if (payload.imports.length > 0) {
+        setData((current) => applyBoxscoreImports(current, payload.imports));
+        const now = new Date().toISOString();
+        setSourceTrace((current) => [
+          ...payload.imports.map((item) => ({
+            id: `${item.game.gameId}-shots-${now}`,
+            sourceUrl: item.sourceUrl,
+            loadedAt: now,
+            loadedBy: "Admin Liga DOS",
+            status: "procesado" as const,
+            confirmedFields: ["carta de tiro", "jugadores", "marcador", "minutos", "puntos"],
+            inferredFields: ["zonas dominantes", "plan defensivo por jugador", "tendencia por cuarto"],
+            manualCorrections: []
+          })),
+          ...current
+        ]);
+      }
+
+      const shotEventsImported = payload.imports.reduce((total, item) => total + (item.shots?.length ?? 0), 0);
+      setShotImportStatus(
+        shotEventsImported > 0
+          ? `Carta de tiro actualizada para ${rivalName}: ${shotEventsImported} tiros confirmados desde ${payload.imports.length} partidos.`
+          : `Se leyeron ${payload.imports.length} partidos, pero no venian coordenadas de carta de tiro. ${payload.errors.join(" | ")}`
+      );
+    } catch (error) {
+      setShotImportStatus(error instanceof Error ? error.message : "Fallo inesperado al capturar carta de tiro.");
+    } finally {
+      setIsShotImporting(false);
+    }
   };
 
   const handleOfficialSync = async () => {
@@ -707,6 +1018,67 @@ export function ScoutingPlatform() {
   const playerRows = isPlayerView ? model.rivalPlayers.slice(0, 4) : model.rivalPlayers.slice(0, 10);
   const ownLead = model.ownPlayers[0];
   const rivalThreat = model.rivalPlayers[0];
+  const rivalSampleGames = competitionGames
+    .filter((game) => game.status === "Final" && (areSameTeam(game.homeTeam, model.rivalTeam.team.name) || areSameTeam(game.awayTeam, model.rivalTeam.team.name)))
+    .filter((game) => {
+      if (scoutingFilters.locality === "home") {
+        return areSameTeam(game.homeTeam, model.rivalTeam.team.name);
+      }
+      if (scoutingFilters.locality === "away") {
+        return areSameTeam(game.awayTeam, model.rivalTeam.team.name);
+      }
+      return true;
+    })
+    .slice(0, scoutingFilters.sampleSize);
+  const rivalSampleGameIds = new Set(rivalSampleGames.map((game) => game.gameId));
+  const rivalSampleMatchIds = new Set(rivalSampleGames.map(matchIdFromGame).filter((matchId): matchId is string => Boolean(matchId)));
+  const rivalShots = (data.shots ?? []).filter((shot) => {
+    const shotMatchId = matchIdFromShot(shot);
+    const belongsToSample =
+      rivalSampleGameIds.has(shot.gameId) || Boolean(shotMatchId && rivalSampleMatchIds.has(shotMatchId));
+    return shot.competition === competition && areSameTeam(shot.teamName, model.rivalTeam.team.name) && belongsToSample;
+  });
+  const rotationShotPlayerNames = uniqueNames([
+    model.rivalPlayers[0]?.name,
+    ...model.rivalRotation.starters,
+    ...model.rivalRotation.coreRotation
+  ]).slice(0, 9);
+  const confirmedShotPlayerNames = uniqueNames(rivalShots.map((shot) => shot.playerName))
+    .sort((nameA, nameB) => {
+      const shotsA = rivalShots.filter((shot) => sameShotPlayer(nameA, shot.playerName)).length;
+      const shotsB = rivalShots.filter((shot) => sameShotPlayer(nameB, shot.playerName)).length;
+      return shotsB - shotsA;
+    })
+    .slice(0, 9);
+  const rotationNamesHaveShots = rotationShotPlayerNames.some((name) => rivalShots.some((shot) => sameShotPlayer(name, shot.playerName)));
+  const shotPlayerNames = rotationNamesHaveShots || confirmedShotPlayerNames.length === 0 ? rotationShotPlayerNames : confirmedShotPlayerNames;
+  const shotPlayerCards: ShotPlayerCard[] = shotPlayerNames.map((name, index) => {
+    const player = model.rivalPlayers.find((item) => sameShotPlayer(item.name, name));
+    const playerShots = rivalShots.filter((shot) => sameShotPlayer(name, shot.playerName));
+    const isMainThreat = index === 0;
+    const isStarter = model.rivalRotation.starters.some((starter) => sameShotPlayer(starter, name));
+    return {
+      name,
+      player,
+      shots: playerShots,
+      role: player?.role ?? (isStarter ? "Titular probable" : "Rotacion"),
+      tag: isMainThreat ? "Amenaza principal" : isStarter ? "Titular" : "Rotacion"
+    };
+  });
+  const activeShotPlayer = shotPlayerCards.find((player) => player.name === selectedShotPlayer) ?? shotPlayerCards[0];
+  const activePlayerShots = activeShotPlayer?.shots ?? [];
+  const filteredShotChart =
+    shotPeriod === "Todo"
+      ? activePlayerShots
+      : activePlayerShots.filter((shot) => shot.period === Number(shotPeriod));
+  const activeShotSummary = shotSummary(activePlayerShots);
+  const filteredShotSummary = shotSummary(filteredShotChart);
+  const activeShotAnalysis = buildShotAnalysis(activeShotPlayer?.name ?? "Jugador rival", activePlayerShots);
+  const storedShotCount = data.shots?.length ?? 0;
+  const shotEmptyCopy =
+    storedShotCount === 0
+      ? "Todavia no hay tiros guardados. Reimporta los links de Estadisticas completas para que la carta quede persistida."
+      : "Hay tiros guardados, pero no calzan con este jugador en el rival y rango actual. Revisa el rival seleccionado o reimporta sus partidos recientes.";
 
   return (
     <main className="premium-shell" style={teamThemeFor(model.ownTeam.team.name)}>
@@ -1088,6 +1460,143 @@ export function ScoutingPlatform() {
               </div>
             </section>
           ))}
+        </section>
+      ) : null}
+
+      {tab === "Carta de tiro" ? (
+        <section className="shot-module">
+          <section className="module-panel shot-header-panel">
+            <div className="module-heading">
+              <div>
+                <p className="eyebrow">Carta de tiro rival · {model.rivalTeam.team.name}</p>
+                <h3>Mapa de {model.rivalTeam.team.name}</h3>
+                <p className="heading-copy">
+                  Rival analizado contra {model.ownTeam.team.name}. Ordenado por amenaza principal, titulares probables y rotacion de 9 jugadores.
+                </p>
+              </div>
+              <div className="shot-actions">
+                {canAdmin ? (
+                  <button
+                    className="secondary-button"
+                    disabled={isShotImporting || rivalSampleGames.length === 0}
+                    onClick={handleShotAutoImport}
+                    type="button"
+                  >
+                    {isShotImporting ? "Generando..." : "Generar carta de tiro"}
+                  </button>
+                ) : null}
+                <button
+                  className="primary-button"
+                  disabled={!activeShotPlayer || activePlayerShots.length === 0}
+                  onClick={() => downloadPdf(`plan-defensivo-${activeShotPlayer?.name ?? "jugador"}.pdf`, shotPlanText(activeShotPlayer?.name ?? "Jugador rival", activePlayerShots))}
+                  type="button"
+                >
+                  Descargar plan
+                </button>
+              </div>
+            </div>
+            <div className="shot-summary-strip">
+              <MetricTile label="Rival" value={model.rivalTeam.team.name} caption={model.rivalTeam.team.zone} />
+              <MetricTile label="Muestra" value={`${rivalSampleGames.length} PJ`} caption={`${range} · ${rivalShots.length} tiros rival`} />
+              <MetricTile label="Tiros jugador" value={String(activeShotSummary.attempts)} caption={`Promedio ${roundOne(activeShotSummary.attempts / Math.max(rivalSampleGames.length, 1))} por partido`} />
+              <MetricTile label="Acierto" value={activeShotSummary.efficiency} caption={`${activeShotSummary.made}/${activeShotSummary.attempts} convertidos`} />
+            </div>
+            <p className="shot-status">{shotImportStatus}</p>
+          </section>
+
+          <section className="shot-layout">
+            <aside className="module-panel shot-player-panel">
+              <div className="module-heading">
+                <p className="eyebrow">Rotacion rival</p>
+                <h3>Prioridad defensiva</h3>
+              </div>
+              <div className="shot-player-list">
+                {shotPlayerCards.map((card, index) => {
+                  const summary = shotSummary(card.shots);
+                  const active = activeShotPlayer?.name === card.name;
+                  return (
+                    <button className={active ? "active" : ""} key={card.name} onClick={() => setSelectedShotPlayer(card.name)} type="button">
+                      <span>{index + 1}</span>
+                      <strong>{card.name}</strong>
+                      <small>{card.tag} · {card.role}</small>
+                      <b>{summary.attempts} tiros · {summary.efficiency}</b>
+                    </button>
+                  );
+                })}
+              </div>
+              <details className="shot-trace">
+                <summary>Partidos y confiabilidad</summary>
+                <p>
+                  Muestra actual de {model.rivalTeam.team.name}: {rivalSampleGames.map((game) => `${game.homeTeam} ${game.homeScore}-${game.awayScore} ${game.awayTeam}`).join(" · ") || "sin partidos oficiales"}.
+                  Dato confirmado solo cuando el partido trae coordenadas de Carta de tiro en Genius/FIBA.
+                </p>
+              </details>
+            </aside>
+
+            <section className="module-panel shot-map-panel">
+              <div className="module-heading">
+                <div>
+                  <p className="eyebrow">{activeShotPlayer?.tag ?? "Jugador"}</p>
+                  <h3>{activeShotPlayer?.name ?? "Sin jugador seleccionado"}</h3>
+                  <p className="heading-copy">{activeShotAnalysis.headline}</p>
+                </div>
+                <label className="shot-filter">
+                  Cuarto
+                  <select value={shotPeriod} onChange={(event) => setShotPeriod(event.target.value as ShotPeriodFilter)}>
+                    <option value="Todo">Todo</option>
+                    <option value="1">1C</option>
+                    <option value="2">2C</option>
+                    <option value="3">3C</option>
+                    <option value="4">4C</option>
+                  </select>
+                </label>
+              </div>
+              <ShotCourt shots={filteredShotChart} />
+              <div className="shot-legend">
+                <span><i className="legend-made" /> Convertido</span>
+                <span><i className="legend-miss" /> Fallado</span>
+                <strong>{filteredShotSummary.attempts} tiros visibles · {filteredShotSummary.efficiency}</strong>
+              </div>
+              {activePlayerShots.length === 0 ? (
+                <div className="shot-empty-state">
+                  <strong>Sin coordenadas para este jugador.</strong>
+                  <p>{shotEmptyCopy}</p>
+                </div>
+              ) : null}
+            </section>
+
+            <aside className="module-panel shot-analysis-panel">
+              <div className="module-heading">
+                <p className="eyebrow">Lectura tactica</p>
+                <h3>Donde castiga</h3>
+              </div>
+              <div className="shot-analysis-list">
+                {activeShotAnalysis.bullets.map((item) => (
+                  <p key={item}>{item}</p>
+                ))}
+              </div>
+              <div className="half-split">
+                <article>
+                  <span>1er tiempo</span>
+                  <strong>{activeShotSummary.firstHalfAttempts}</strong>
+                  <small>tiros</small>
+                </article>
+                <article>
+                  <span>2do tiempo</span>
+                  <strong>{activeShotSummary.secondHalfAttempts}</strong>
+                  <small>tiros</small>
+                </article>
+              </div>
+              <div className="defense-plan">
+                <span>Plan defensivo</span>
+                <p>{activeShotAnalysis.plan}</p>
+              </div>
+              <div className="player-mode-shot">
+                <span>Modo jugador</span>
+                <p>Negar zona dominante, contestar sin falta y comunicar si sube volumen en {activeShotSummary.topQuarter}.</p>
+              </div>
+            </aside>
+          </section>
         </section>
       ) : null}
 

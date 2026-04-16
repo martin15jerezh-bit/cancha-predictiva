@@ -60,10 +60,27 @@ export type GameRow = {
   notes: string;
 };
 
+export type ShotRow = {
+  shotId: string;
+  gameId: string;
+  competition: string;
+  teamName: string;
+  playerName: string;
+  shirtNumber: string;
+  period: number;
+  actionType: string;
+  subType: string;
+  made: boolean;
+  x: number;
+  y: number;
+  sourceUrl: string;
+};
+
 export type DatasetMap = {
   teams: TeamRow[];
   players: PlayerRow[];
   games: GameRow[];
+  shots: ShotRow[];
 };
 
 export type ValidationResult = {
@@ -84,6 +101,7 @@ export type BoxscoreImport = {
   sourceUrl: string;
   game: GameRow;
   players: PlayerRow[];
+  shots: ShotRow[];
   teamStats: Array<{
     teamName: string;
     points: number;

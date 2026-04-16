@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CURRENT_COMPETITION, areSameTeam, competitionLabels, seedData } from "@/lib/data";
-import { BoxscoreImport, CompetitionKey, GameRow, PlayerRow } from "@/lib/types";
+import { BoxscoreImport, CompetitionKey, GameRow, PlayerRow, ShotRow } from "@/lib/types";
 
 type FibaTeam = {
   name?: string;
@@ -33,6 +33,20 @@ type FibaTeam = {
       starter?: number;
     }
   >;
+  shot?: Array<{
+    r?: number;
+    x?: number;
+    y?: number;
+    p?: number;
+    pno?: number;
+    tno?: number;
+    per?: number;
+    actionType?: string;
+    actionNumber?: number;
+    subType?: string;
+    player?: string;
+    shirtNumber?: string;
+  }>;
 };
 
 type FibaPayload = {
@@ -302,6 +316,38 @@ function toPlayerRows(teamName: string, team: FibaTeam, competition: Competition
     }));
 }
 
+function toShotRows({
+  teamName,
+  team,
+  competition,
+  gameId,
+  sourceUrl
+}: {
+  teamName: string;
+  team: FibaTeam;
+  competition: CompetitionKey;
+  gameId: string;
+  sourceUrl: string;
+}): ShotRow[] {
+  return (team.shot ?? [])
+    .filter((shot) => typeof shot.x === "number" && typeof shot.y === "number" && Boolean(shot.player))
+    .map((shot, index) => ({
+      shotId: `${gameId}-${teamName}-${shot.actionNumber ?? index}-${shot.player ?? "jugador"}`,
+      gameId,
+      competition,
+      teamName,
+      playerName: shot.player ?? "Jugador sin nombre",
+      shirtNumber: String(shot.shirtNumber ?? ""),
+      period: Number(shot.per ?? 0),
+      actionType: shot.actionType ?? "",
+      subType: shot.subType ?? "",
+      made: Number(shot.r ?? 0) === 1,
+      x: Number(shot.x),
+      y: Number(shot.y),
+      sourceUrl
+    }));
+}
+
 async function importBoxscore(target: ImportTarget, competition: CompetitionKey): Promise<BoxscoreImport> {
   const dataUrl = normalizeFibaUrl(target.dataUrl);
   const matchId = extractMatchId(target.dataUrl);
@@ -343,11 +389,16 @@ async function importBoxscore(target: ImportTarget, competition: CompetitionKey)
     status: "Final",
     notes: `Importado desde FIBA ${matchId}${target.gameTime ? ` · ${target.gameTime}` : ""}`
   };
+  const shots = [
+    ...toShotRows({ teamName: homeTeam, team: teamOne, competition, gameId: game.gameId, sourceUrl: target.sourceUrl }),
+    ...toShotRows({ teamName: awayTeam, team: teamTwo, competition, gameId: game.gameId, sourceUrl: target.sourceUrl })
+  ];
 
   return {
     sourceUrl: target.sourceUrl,
     game,
     players: [...toPlayerRows(homeTeam, teamOne, competition), ...toPlayerRows(awayTeam, teamTwo, competition)],
+    shots,
     teamStats: [
       {
         teamName: homeTeam,
