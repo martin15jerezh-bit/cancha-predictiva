@@ -1875,7 +1875,7 @@ input {
   grid-template-columns: 30px minmax(0, 1fr);
   gap: 3px 9px;
   width: 100%;
-  min-height: 76px;
+  min-height: 92px;
   border: 1px solid rgba(22, 31, 27, 0.1);
   border-radius: 8px;
   padding: 10px;
@@ -1890,7 +1890,7 @@ input {
 }
 
 .shot-player-list button > span {
-  grid-row: span 3;
+  grid-row: span 4;
   display: grid;
   width: 28px;
   height: 28px;
@@ -1903,7 +1903,8 @@ input {
 
 .shot-player-list strong,
 .shot-player-list small,
-.shot-player-list b {
+.shot-player-list b,
+.shot-player-list em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1925,6 +1926,13 @@ input {
   font-size: 0.82rem;
 }
 
+.shot-player-list em {
+  color: var(--team-primary, #0f766e);
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 850;
+}
+
 .shot-trace {
   border-top: 1px solid rgba(22, 31, 27, 0.08);
   padding-top: 10px;
@@ -1938,6 +1946,13 @@ input {
   font-weight: 800;
 }
 
+.shot-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .shot-filter {
   display: grid;
   gap: 5px;
@@ -1945,6 +1960,10 @@ input {
   color: #64716b;
   font-size: 0.78rem;
   font-weight: 800;
+}
+
+.shot-filter.wide {
+  min-width: min(310px, 100%);
 }
 
 .shot-court {

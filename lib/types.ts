@@ -46,6 +46,12 @@ export type PlayerRow = {
   games?: string;
 };
 
+export type PlayerGameStatRow = PlayerRow & {
+  statId: string;
+  gameId: string;
+  sourceUrl: string;
+};
+
 export type GameRow = {
   gameId: string;
   competition: string;
@@ -80,6 +86,7 @@ export type DatasetMap = {
   teams: TeamRow[];
   players: PlayerRow[];
   games: GameRow[];
+  playerGameStats: PlayerGameStatRow[];
   shots: ShotRow[];
 };
 
@@ -101,6 +108,7 @@ export type BoxscoreImport = {
   sourceUrl: string;
   game: GameRow;
   players: PlayerRow[];
+  playerGameStats: PlayerGameStatRow[];
   shots: ShotRow[];
   teamStats: Array<{
     teamName: string;

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CURRENT_COMPETITION, areSameTeam, competitionLabels, seedData } from "@/lib/data";
-import { BoxscoreImport, CompetitionKey, GameRow, PlayerRow, ShotRow } from "@/lib/types";
+import { BoxscoreImport, CompetitionKey, GameRow, PlayerGameStatRow, PlayerRow, ShotRow } from "@/lib/types";
 
 type FibaTeam = {
   name?: string;
@@ -316,6 +316,27 @@ function toPlayerRows(teamName: string, team: FibaTeam, competition: Competition
     }));
 }
 
+function toPlayerGameStatRows({
+  teamName,
+  team,
+  competition,
+  gameId,
+  sourceUrl
+}: {
+  teamName: string;
+  team: FibaTeam;
+  competition: CompetitionKey;
+  gameId: string;
+  sourceUrl: string;
+}): PlayerGameStatRow[] {
+  return toPlayerRows(teamName, team, competition).map((player) => ({
+    ...player,
+    statId: `${gameId}-${slugify(teamName)}-${slugify(player.name)}`,
+    gameId,
+    sourceUrl
+  }));
+}
+
 function toShotRows({
   teamName,
   team,
@@ -393,11 +414,17 @@ async function importBoxscore(target: ImportTarget, competition: CompetitionKey)
     ...toShotRows({ teamName: homeTeam, team: teamOne, competition, gameId: game.gameId, sourceUrl: target.sourceUrl }),
     ...toShotRows({ teamName: awayTeam, team: teamTwo, competition, gameId: game.gameId, sourceUrl: target.sourceUrl })
   ];
+  const players = [...toPlayerRows(homeTeam, teamOne, competition), ...toPlayerRows(awayTeam, teamTwo, competition)];
+  const playerGameStats = [
+    ...toPlayerGameStatRows({ teamName: homeTeam, team: teamOne, competition, gameId: game.gameId, sourceUrl: target.sourceUrl }),
+    ...toPlayerGameStatRows({ teamName: awayTeam, team: teamTwo, competition, gameId: game.gameId, sourceUrl: target.sourceUrl })
+  ];
 
   return {
     sourceUrl: target.sourceUrl,
     game,
-    players: [...toPlayerRows(homeTeam, teamOne, competition), ...toPlayerRows(awayTeam, teamTwo, competition)],
+    players,
+    playerGameStats,
     shots,
     teamStats: [
       {

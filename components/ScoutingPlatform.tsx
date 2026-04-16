@@ -14,7 +14,7 @@ import {
   YAxis
 } from "recharts";
 import { applyBoxscoreImports, areSameTeam, getPointDifferential, LIGA_DOS_COMPETITION, parseNumber, seedData } from "@/lib/data";
-import { BoxscoreImport, CompetitionKey, DatasetMap, GameRow, PlayerRow, ShotRow, TeamRow } from "@/lib/types";
+import { BoxscoreImport, CompetitionKey, DatasetMap, GameRow, PlayerGameStatRow, PlayerRow, ShotRow, TeamRow } from "@/lib/types";
 import {
   buildEditableReport,
   buildScoutingModel,
@@ -308,6 +308,7 @@ function SignalList({ title, signals }: { title: string; signals: MatchupScout["
 }
 
 type ShotPeriodFilter = "Todo" | "1" | "2" | "3" | "4";
+type ShotGameFilter = "Todos" | string;
 type ShotPlayerCard = {
   name: string;
   role: string;
@@ -556,9 +557,30 @@ function matchIdFromShot(shot: ShotRow) {
   );
 }
 
+function matchIdFromPlayerGameStat(stat: PlayerGameStatRow) {
+  return (
+    stat.gameId.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1] ??
+    stat.sourceUrl.match(/\/data\/(\d+)/)?.[1] ??
+    stat.sourceUrl.match(/\/u\/[^/]+\/(\d+)/)?.[1]
+  );
+}
+
 function dataUrlFromGame(game: GameRow) {
   const matchId = matchIdFromGame(game);
   return matchId ? `https://fibalivestats.dcd.shared.geniussports.com/data/${matchId}/data.json` : null;
+}
+
+function minutesToDecimal(value: string | undefined) {
+  const raw = String(value ?? "").trim();
+  if (raw.includes(":")) {
+    const [minutes, seconds] = raw.split(":").map(Number);
+    return (Number.isFinite(minutes) ? minutes : 0) + (Number.isFinite(seconds) ? seconds / 60 : 0);
+  }
+  return parseNumber(raw);
+}
+
+function formatMinutes(value: number) {
+  return `${roundOne(value)} min`;
 }
 
 function replaceLigaDosDataset(current: DatasetMap, official: OfficialSyncPayload): DatasetMap {
@@ -597,6 +619,7 @@ function replaceLigaDosDataset(current: DatasetMap, official: OfficialSyncPayloa
       ...mergedOfficialGames,
       ...preservedImportedGames
     ],
+    playerGameStats: current.playerGameStats ?? [],
     shots: current.shots ?? []
   };
 }
@@ -605,7 +628,7 @@ function migrateStoredDataset(current: DatasetMap): DatasetMap {
   const hasOfficialSync = current.teams.some((team) => team.competition === LIGA_DOS_COMPETITION && team.teamId.startsWith("GENIUS-"));
 
   if (hasOfficialSync) {
-    return { ...current, shots: current.shots ?? [] };
+    return { ...current, playerGameStats: current.playerGameStats ?? [], shots: current.shots ?? [] };
   }
 
   const seedLigaTeams = seedData.teams.filter((team) => team.competition === LIGA_DOS_COMPETITION);
@@ -628,6 +651,7 @@ function migrateStoredDataset(current: DatasetMap): DatasetMap {
       ...seedLigaGames.filter((game) => !importedKeys.has(fixtureKey(game))),
       ...importedGames
     ],
+    playerGameStats: current.playerGameStats ?? [],
     shots: current.shots ?? []
   };
 }
@@ -749,6 +773,7 @@ export function ScoutingPlatform() {
   const [locality, setLocality] = useState<LocalityKey>("Local y visita");
   const [selectedShotPlayer, setSelectedShotPlayer] = useState("");
   const [shotPeriod, setShotPeriod] = useState<ShotPeriodFilter>("Todo");
+  const [shotGameFilter, setShotGameFilter] = useState<ShotGameFilter>("Todos");
   const [urls, setUrls] = useState("");
   const [ingestStatus, setIngestStatus] = useState("Listo para pegar links FEBACHILE / Genius Sports.");
   const [officialSyncStatus, setOfficialSyncStatus] = useState("Base oficial lista para sincronizar standings, equipos, rosters y fixture.");
@@ -1030,6 +1055,23 @@ export function ScoutingPlatform() {
       return true;
     })
     .slice(0, scoutingFilters.sampleSize);
+  const shotGameOptions = rivalSampleGames
+    .map((game) => {
+      const value = matchIdFromGame(game) ?? game.gameId;
+      const rivalIsHome = areSameTeam(game.homeTeam, model.rivalTeam.team.name);
+      const opponent = rivalIsHome ? game.awayTeam : game.homeTeam;
+      const rivalScore = rivalIsHome ? game.homeScore : game.awayScore;
+      const opponentScore = rivalIsHome ? game.awayScore : game.homeScore;
+      const location = rivalIsHome ? "vs" : "@";
+      return {
+        value,
+        label: `${location} ${opponent}`,
+        detail: `${game.date} · ${rivalScore}-${opponentScore}`
+      };
+    })
+    .filter((option, index, options) => options.findIndex((item) => item.value === option.value) === index);
+  const shotGameOptionValues = new Set(shotGameOptions.map((option) => option.value));
+  const activeShotGameFilter = shotGameFilter === "Todos" || shotGameOptionValues.has(shotGameFilter) ? shotGameFilter : "Todos";
   const rivalSampleGameIds = new Set(rivalSampleGames.map((game) => game.gameId));
   const rivalSampleMatchIds = new Set(rivalSampleGames.map(matchIdFromGame).filter((matchId): matchId is string => Boolean(matchId)));
   const rivalShots = (data.shots ?? []).filter((shot) => {
@@ -1038,6 +1080,34 @@ export function ScoutingPlatform() {
       rivalSampleGameIds.has(shot.gameId) || Boolean(shotMatchId && rivalSampleMatchIds.has(shotMatchId));
     return shot.competition === competition && areSameTeam(shot.teamName, model.rivalTeam.team.name) && belongsToSample;
   });
+  const rivalPlayerGameStats = (data.playerGameStats ?? []).filter((stat) => {
+    const statMatchId = matchIdFromPlayerGameStat(stat);
+    const belongsToSample =
+      rivalSampleGameIds.has(stat.gameId) || Boolean(statMatchId && rivalSampleMatchIds.has(statMatchId));
+    return stat.competition === competition && areSameTeam(stat.teamName, model.rivalTeam.team.name) && belongsToSample;
+  });
+  const filterShotsByGame = (shots: ShotRow[]) => {
+    if (activeShotGameFilter === "Todos") {
+      return shots;
+    }
+    return shots.filter((shot) => shot.gameId === activeShotGameFilter || matchIdFromShot(shot) === activeShotGameFilter);
+  };
+  const filterStatsByGame = (stats: PlayerGameStatRow[]) => {
+    if (activeShotGameFilter === "Todos") {
+      return stats;
+    }
+    return stats.filter((stat) => stat.gameId === activeShotGameFilter || matchIdFromPlayerGameStat(stat) === activeShotGameFilter);
+  };
+  const playerMinutesLabel = (playerName: string, player?: MatchupScout["rivalPlayers"][number]) => {
+    const playerStats = filterStatsByGame(rivalPlayerGameStats.filter((stat) => sameShotPlayer(playerName, stat.name)));
+    if (playerStats.length > 0) {
+      const minutes = playerStats.reduce((total, stat) => total + minutesToDecimal(stat.minutes), 0) / playerStats.length;
+      return activeShotGameFilter === "Todos" ? `${formatMinutes(minutes)}/PJ` : formatMinutes(minutes);
+    }
+    return player ? `${formatMinutes(player.minutes)}/PJ` : "min s/d";
+  };
+  const activeRivalShots = filterShotsByGame(rivalShots);
+  const activeShotGameCount = activeShotGameFilter === "Todos" ? rivalSampleGames.length : Math.min(rivalSampleGames.length, 1);
   const rotationShotPlayerNames = uniqueNames([
     model.rivalPlayers[0]?.name,
     ...model.rivalRotation.starters,
@@ -1067,13 +1137,14 @@ export function ScoutingPlatform() {
   });
   const activeShotPlayer = shotPlayerCards.find((player) => player.name === selectedShotPlayer) ?? shotPlayerCards[0];
   const activePlayerShots = activeShotPlayer?.shots ?? [];
+  const activeGamePlayerShots = filterShotsByGame(activePlayerShots);
   const filteredShotChart =
     shotPeriod === "Todo"
-      ? activePlayerShots
-      : activePlayerShots.filter((shot) => shot.period === Number(shotPeriod));
-  const activeShotSummary = shotSummary(activePlayerShots);
+      ? activeGamePlayerShots
+      : activeGamePlayerShots.filter((shot) => shot.period === Number(shotPeriod));
+  const activeShotSummary = shotSummary(activeGamePlayerShots);
   const filteredShotSummary = shotSummary(filteredShotChart);
-  const activeShotAnalysis = buildShotAnalysis(activeShotPlayer?.name ?? "Jugador rival", activePlayerShots);
+  const activeShotAnalysis = buildShotAnalysis(activeShotPlayer?.name ?? "Jugador rival", activeGamePlayerShots);
   const storedShotCount = data.shots?.length ?? 0;
   const shotEmptyCopy =
     storedShotCount === 0
@@ -1487,8 +1558,8 @@ export function ScoutingPlatform() {
                 ) : null}
                 <button
                   className="primary-button"
-                  disabled={!activeShotPlayer || activePlayerShots.length === 0}
-                  onClick={() => downloadPdf(`plan-defensivo-${activeShotPlayer?.name ?? "jugador"}.pdf`, shotPlanText(activeShotPlayer?.name ?? "Jugador rival", activePlayerShots))}
+                  disabled={!activeShotPlayer || activeGamePlayerShots.length === 0}
+                  onClick={() => downloadPdf(`plan-defensivo-${activeShotPlayer?.name ?? "jugador"}.pdf`, shotPlanText(activeShotPlayer?.name ?? "Jugador rival", activeGamePlayerShots))}
                   type="button"
                 >
                   Descargar plan
@@ -1497,8 +1568,8 @@ export function ScoutingPlatform() {
             </div>
             <div className="shot-summary-strip">
               <MetricTile label="Rival" value={model.rivalTeam.team.name} caption={model.rivalTeam.team.zone} />
-              <MetricTile label="Muestra" value={`${rivalSampleGames.length} PJ`} caption={`${range} · ${rivalShots.length} tiros rival`} />
-              <MetricTile label="Tiros jugador" value={String(activeShotSummary.attempts)} caption={`Promedio ${roundOne(activeShotSummary.attempts / Math.max(rivalSampleGames.length, 1))} por partido`} />
+              <MetricTile label="Muestra" value={`${activeShotGameCount} PJ`} caption={`${activeShotGameFilter === "Todos" ? range : "Partido seleccionado"} · ${activeRivalShots.length} tiros rival`} />
+              <MetricTile label="Tiros jugador" value={String(activeShotSummary.attempts)} caption={`Promedio ${roundOne(activeShotSummary.attempts / Math.max(activeShotGameCount, 1))} por partido`} />
               <MetricTile label="Acierto" value={activeShotSummary.efficiency} caption={`${activeShotSummary.made}/${activeShotSummary.attempts} convertidos`} />
             </div>
             <p className="shot-status">{shotImportStatus}</p>
@@ -1512,7 +1583,7 @@ export function ScoutingPlatform() {
               </div>
               <div className="shot-player-list">
                 {shotPlayerCards.map((card, index) => {
-                  const summary = shotSummary(card.shots);
+                  const summary = shotSummary(filterShotsByGame(card.shots));
                   const active = activeShotPlayer?.name === card.name;
                   return (
                     <button className={active ? "active" : ""} key={card.name} onClick={() => setSelectedShotPlayer(card.name)} type="button">
@@ -1520,6 +1591,7 @@ export function ScoutingPlatform() {
                       <strong>{card.name}</strong>
                       <small>{card.tag} · {card.role}</small>
                       <b>{summary.attempts} tiros · {summary.efficiency}</b>
+                      <em>{playerMinutesLabel(card.name, card.player)}</em>
                     </button>
                   );
                 })}
@@ -1540,16 +1612,29 @@ export function ScoutingPlatform() {
                   <h3>{activeShotPlayer?.name ?? "Sin jugador seleccionado"}</h3>
                   <p className="heading-copy">{activeShotAnalysis.headline}</p>
                 </div>
-                <label className="shot-filter">
-                  Cuarto
-                  <select value={shotPeriod} onChange={(event) => setShotPeriod(event.target.value as ShotPeriodFilter)}>
-                    <option value="Todo">Todo</option>
-                    <option value="1">1C</option>
-                    <option value="2">2C</option>
-                    <option value="3">3C</option>
-                    <option value="4">4C</option>
-                  </select>
-                </label>
+                <div className="shot-filter-group">
+                  <label className="shot-filter wide">
+                    Partido
+                    <select value={activeShotGameFilter} onChange={(event) => setShotGameFilter(event.target.value as ShotGameFilter)}>
+                      <option value="Todos">Todos los partidos</option>
+                      {shotGameOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label} · {option.detail}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="shot-filter">
+                    Cuarto
+                    <select value={shotPeriod} onChange={(event) => setShotPeriod(event.target.value as ShotPeriodFilter)}>
+                      <option value="Todo">Todo</option>
+                      <option value="1">1C</option>
+                      <option value="2">2C</option>
+                      <option value="3">3C</option>
+                      <option value="4">4C</option>
+                    </select>
+                  </label>
+                </div>
               </div>
               <ShotCourt shots={filteredShotChart} />
               <div className="shot-legend">
@@ -1557,7 +1642,7 @@ export function ScoutingPlatform() {
                 <span><i className="legend-miss" /> Fallado</span>
                 <strong>{filteredShotSummary.attempts} tiros visibles · {filteredShotSummary.efficiency}</strong>
               </div>
-              {activePlayerShots.length === 0 ? (
+              {activeGamePlayerShots.length === 0 ? (
                 <div className="shot-empty-state">
                   <strong>Sin coordenadas para este jugador.</strong>
                   <p>{shotEmptyCopy}</p>
