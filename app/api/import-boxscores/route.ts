@@ -67,6 +67,34 @@ const competitionGeniusIds: Partial<Record<CompetitionKey, string>> = {
   "Liga Nacional Femenina 2026": "48641"
 };
 
+const boxscoreTeamAliases: Partial<Record<CompetitionKey, Record<string, string>>> = {
+  "Liga Chery Apertura 2026": {
+    "CD ESPANOL OSORNO": "Espanol de Osorno",
+    "CD ESPAÑOL OSORNO": "Espanol de Osorno",
+    "ESPANOL OSORNO": "Espanol de Osorno",
+    "ESPAÑOL OSORNO": "Espanol de Osorno",
+    "CD ESPANOL TALCA": "Espanol de Talca",
+    "CD ESPAÑOL TALCA": "Espanol de Talca",
+    "ESPANOL TALCA": "Espanol de Talca",
+    "ESPAÑOL TALCA": "Espanol de Talca",
+    "CD UNIV CONCEPCION": "Universidad de Concepcion",
+    "CD UNIV. CONCEPCION": "Universidad de Concepcion",
+    "CD UNIVERSIDAD DE CONCEPCION": "Universidad de Concepcion",
+    "CD UNIV CATOLICA": "Universidad Catolica",
+    "CD UNIV. CATOLICA": "Universidad Catolica",
+    "CD UNIVERSIDAD CATOLICA": "Universidad Catolica",
+    "CSD COLO COLO": "Colo-Colo",
+    "CD COLO COLO": "Colo-Colo"
+  },
+  "Liga DOS 2026": {
+    "ARABE VALPARAISO": "Arabe de Valparaiso",
+    "CDS BASQUETBOL CONSTITUCION": "CDSB Constitucion",
+    "CDS BASQUETBOL CONSTITUCIÓN": "CDSB Constitucion",
+    "THE SHARKS": "CD Sharks",
+    "UDE TEMUCO": "UDE Temuco"
+  }
+};
+
 function extractMatchId(url: string) {
   const decoded = decodeURIComponent(url);
   const patterns = [
@@ -275,8 +303,25 @@ function normalizeFibaUrl(url: string) {
   return matchId ? `https://fibalivestats.dcd.shared.geniussports.com/data/${matchId}/data.json` : null;
 }
 
-function findTeamName(fibaName: string) {
-  return seedData.teams.find((team) => areSameTeam(team.name, fibaName))?.name ?? fibaName;
+function aliasKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s.]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+function findTeamName(fibaName: string, competition: CompetitionKey) {
+  const normalizedKey = aliasKey(fibaName);
+  const alias = boxscoreTeamAliases[competition]?.[normalizedKey];
+  if (alias) {
+    return alias;
+  }
+  return seedData.teams.find((team) => team.competition === competition && areSameTeam(team.name, fibaName))?.name
+    ?? seedData.teams.find((team) => areSameTeam(team.name, fibaName))?.name
+    ?? fibaName;
 }
 
 function slugify(value: string) {
@@ -394,13 +439,13 @@ async function importBoxscore(target: ImportTarget, competition: CompetitionKey)
     throw new Error(`El boxscore no contiene dos equipos: ${target.sourceUrl}`);
   }
 
-  const homeTeam = findTeamName(teamOne.name ?? teamOne.shortName ?? "Local");
-  const awayTeam = findTeamName(teamTwo.name ?? teamTwo.shortName ?? "Visita");
+  const homeTeam = findTeamName(teamOne.name ?? teamOne.shortName ?? "Local", competition);
+  const awayTeam = findTeamName(teamTwo.name ?? teamTwo.shortName ?? "Visita", competition);
 
   const game: GameRow = {
     gameId: `FIBA-${matchId}`,
     competition,
-    phase: target.phase ?? seedData.teams.find((team) => team.name === homeTeam)?.zone ?? "Importado desde FIBA",
+    phase: target.phase ?? seedData.teams.find((team) => team.competition === competition && team.name === homeTeam)?.zone ?? "Importado desde FIBA",
     week: "Importado",
     date: target.gameDate ?? new Date().toISOString().slice(0, 10),
     homeTeam,

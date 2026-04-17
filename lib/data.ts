@@ -1060,6 +1060,8 @@ export function normalizeTeamName(value: string) {
     .replace(/^csd\s+/, "")
     .replace(/^corp\.\s*dep\.\s*/, "")
     .replace(/^mun\.\s*/, "municipal ")
+    .replace(/[-_]+/g, " ")
+    .replace(/\bde\s+/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1188,12 +1190,48 @@ function mergeRowsByKey<T>(current: T[], incoming: T[], getKey: (row: T) => stri
   return Array.from(next.values());
 }
 
+function matchIdFromStoredGame(game: GameRow) {
+  return game.gameId.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1] ?? game.notes.match(/(?:FIBA|Genius)\s+(\d+)/)?.[1];
+}
+
+function gameIdentityKey(game: GameRow) {
+  const matchId = matchIdFromStoredGame(game);
+  if (matchId) {
+    return `${game.competition}-match-${matchId}`;
+  }
+  return `${game.competition}-${game.date}-${normalizeTeamName(game.homeTeam)}-${normalizeTeamName(game.awayTeam)}`;
+}
+
+function mergeGameRows(existing: GameRow, incoming: GameRow): GameRow {
+  const official = existing.gameId.startsWith("GENIUS-") ? existing : incoming.gameId.startsWith("GENIUS-") ? incoming : existing;
+  const latest = incoming.status === "Final" || incoming.notes.toLowerCase().includes("importado desde fiba") ? incoming : existing;
+  const notes = Array.from(new Set([official.notes, existing.notes, incoming.notes].filter(Boolean))).join(" · ");
+
+  return {
+    ...official,
+    homeScore: latest.homeScore || official.homeScore,
+    awayScore: latest.awayScore || official.awayScore,
+    status: latest.status === "Final" ? "Final" : official.status,
+    notes
+  };
+}
+
+function mergeGamesByIdentity(current: GameRow[], incoming: GameRow[]) {
+  const next = new Map<string, GameRow>();
+  [...current, ...incoming].forEach((game) => {
+    const key = gameIdentityKey(game);
+    const existing = next.get(key);
+    next.set(key, existing ? mergeGameRows(existing, game) : game);
+  });
+  return Array.from(next.values());
+}
+
 export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]): DatasetMap {
   const importedGames = imports.map((item) => item.game);
   const importedPlayers = imports.flatMap((item) => item.players);
   const importedPlayerGameStats = imports.flatMap((item) => item.playerGameStats ?? []);
   const importedShots = imports.flatMap((item) => item.shots ?? []);
-  const games = mergeRowsByKey(data.games, importedGames, (game) => `${game.date}-${game.homeTeam}-${game.awayTeam}`);
+  const games = mergeGamesByIdentity(data.games, importedGames);
   const players = mergeRowsByKey(
     data.players,
     importedPlayers,
@@ -1234,6 +1272,14 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
   const baseTeams = [...data.teams, ...createdTeams];
 
   const teamTotals = baseTeams.map((team) => {
+    const importedStats = imports
+      .flatMap((item) => item.teamStats)
+      .filter((stat) => areSameTeam(stat.teamName, team.name));
+
+    if (team.teamId.startsWith("GENIUS-")) {
+      return team;
+    }
+
     const teamGames = games.filter((game) => {
       return game.status === "Final" && (areSameTeam(game.homeTeam, team.name) || areSameTeam(game.awayTeam, team.name));
     });
@@ -1259,9 +1305,6 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
       { pointsFor: 0, pointsAgainst: 0, wins: 0, losses: 0 }
     );
 
-    const importedStats = imports
-      .flatMap((item) => item.teamStats)
-      .filter((stat) => areSameTeam(stat.teamName, team.name));
     const rebounds =
       importedStats.length === 0
         ? team.reboundsPerGame

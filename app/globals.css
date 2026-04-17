@@ -1228,6 +1228,182 @@ input {
   color: #111612;
 }
 
+.hero-main .league-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  align-items: flex-end;
+  max-width: 880px;
+  position: relative;
+  z-index: 4;
+}
+
+.league-title h1 {
+  margin: 0;
+}
+
+.league-title-picker {
+  position: relative;
+  margin-bottom: 5px;
+}
+
+.league-title-select {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 168px;
+  min-height: 56px;
+  padding: 8px 44px 9px 16px;
+  border: 1px solid rgba(17, 22, 18, 0.18);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, #151916 0%, #243029 100%),
+    #151916;
+  box-shadow:
+    0 18px 34px rgba(17, 22, 18, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+}
+
+.league-title-select::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  border-radius: 8px 0 0 8px;
+  background: var(--team-primary, #0f766e);
+}
+
+.league-title-select::after {
+  content: "";
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid color-mix(in srgb, var(--team-primary, #0f766e) 70%, #ffffff);
+  border-bottom: 2px solid color-mix(in srgb, var(--team-primary, #0f766e) 70%, #ffffff);
+  transform: translateY(-68%) rotate(45deg);
+  opacity: 0.95;
+}
+
+.league-title-select strong {
+  color: #ffffff;
+  font-size: 1.05rem;
+  font-weight: 950;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+}
+
+.league-title-select small {
+  margin-bottom: 4px;
+  color: color-mix(in srgb, var(--team-primary, #0f766e) 55%, #ffffff);
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.league-title-select:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 22px 38px rgba(17, 22, 18, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.league-title-picker.open .league-title-select::after {
+  transform: translateY(-28%) rotate(225deg);
+}
+
+.league-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 20;
+  display: grid;
+  width: 280px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(17, 22, 18, 0.98), rgba(30, 42, 35, 0.98)),
+    #111612;
+  box-shadow:
+    0 28px 70px rgba(17, 22, 18, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.league-menu::before {
+  content: "";
+  position: absolute;
+  right: 24px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: #111612;
+  transform: rotate(45deg);
+}
+
+.league-menu button {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 12px 14px 12px 42px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #f8fbf9;
+  text-align: left;
+  cursor: pointer;
+}
+
+.league-menu button::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 18px;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(248, 251, 249, 0.42);
+  border-radius: 999px;
+}
+
+.league-menu button.selected {
+  border-color: color-mix(in srgb, var(--team-primary, #0f766e) 42%, transparent);
+  background: color-mix(in srgb, var(--team-primary, #0f766e) 18%, transparent);
+}
+
+.league-menu button.selected::before {
+  border-color: var(--team-primary, #0f766e);
+  background: var(--team-primary, #0f766e);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--team-primary, #0f766e) 18%, transparent);
+}
+
+.league-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.league-menu span,
+.league-menu small {
+  color: rgba(248, 251, 249, 0.62);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.league-menu strong {
+  color: #ffffff;
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
 .hero-main p:not(.eyebrow) {
   max-width: 760px;
   color: #526059;
@@ -1267,7 +1443,7 @@ input {
 }
 
 .control-bar {
-  grid-template-columns: 1.05fr 1.05fr 0.82fr 0.82fr;
+  grid-template-columns: 0.78fr 1.05fr 1.05fr 0.82fr 0.82fr;
   align-items: end;
   margin: 12px 0;
   padding: 12px;

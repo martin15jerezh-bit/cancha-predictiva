@@ -14,6 +14,7 @@ import {
 import {
   applyBoxscoreImports,
   areSameTeam,
+  CURRENT_COMPETITION,
   getAssistsPerGame,
   getPointDifferential,
   getPointsAgainstPerGame,
@@ -58,6 +59,7 @@ type TabKey = (typeof tabs)[number];
 type NoteScope = "rival" | "partido" | "jugador" | "equipo";
 type RangeKey = "Ultimos 3 partidos" | "Ultimos 5 partidos" | "Ultimos 8 disponibles";
 type LocalityKey = "Local y visita" | "Solo local" | "Solo visita";
+type ScoutingCompetitionKey = "Liga DOS 2026" | "Liga Chery Apertura 2026";
 type PrivateNote = {
   id: string;
   scope: NoteScope;
@@ -66,6 +68,70 @@ type PrivateNote = {
   userRole: UserRole;
   createdAt: string;
 };
+
+const SCOUTING_COMPETITIONS: ScoutingCompetitionKey[] = [
+  LIGA_DOS_COMPETITION as ScoutingCompetitionKey,
+  CURRENT_COMPETITION as ScoutingCompetitionKey
+];
+const competitionDisplay: Record<ScoutingCompetitionKey, { label: string; shortLabel: string; kicker: string; sourceUrl: string; placeholderId: string }> = {
+  "Liga DOS 2026": {
+    label: "Liga DOS Chile",
+    shortLabel: "Liga DOS",
+    kicker: "Liga DOS Chile · Scouting privado",
+    sourceUrl: "https://clnb.web.geniussports.com/?p=9&WHurl=%2Fcompetition%2F48159%2Fstandings",
+    placeholderId: "48159"
+  },
+  "Liga Chery Apertura 2026": {
+    label: "LNB Chile",
+    shortLabel: "LNB Chile",
+    kicker: "LNB Chile · Scouting privado",
+    sourceUrl: "https://clnb.web.geniussports.com/?p=9&WHurl=%2Fcompetition%2F48076%2Fstandings",
+    placeholderId: "48076"
+  }
+};
+
+function competitionCopy(competition: CompetitionKey) {
+  const key = SCOUTING_COMPETITIONS.includes(competition as ScoutingCompetitionKey)
+    ? competition as ScoutingCompetitionKey
+    : "Liga DOS 2026";
+  return competitionDisplay[key];
+}
+
+function competitionFileSlug(competition: CompetitionKey) {
+  return competitionCopy(competition)
+    .shortLabel.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function normalizedText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function lnbZoneForTeamName(teamName: string) {
+  const normalized = normalizedText(teamName);
+  if (/osorno|animas|valdivia|puerto varas|puerto montt|ancud|castro/.test(normalized)) {
+    return "Conferencia Sur";
+  }
+  if (/concepcion|puente alto|leones|boston|colo|catolica|talca/.test(normalized)) {
+    return "Conferencia Centro";
+  }
+  return "LNB Chile";
+}
+
+function displayZoneForTeam(team: TeamRow) {
+  const seeded = seedData.teams.find((item) => item.competition === team.competition && areSameTeam(item.name, team.name));
+  if (seeded?.zone) {
+    return seeded.zone;
+  }
+  if (team.competition === CURRENT_COMPETITION) {
+    return lnbZoneForTeamName(team.name);
+  }
+  return team.zone;
+}
 type OfficialSyncPayload = {
   teams: TeamRow[];
   players: PlayerRow[];
@@ -812,8 +878,8 @@ function seasonTeamMetrics(team: TeamRow) {
   };
 }
 
-function replaceLigaDosDataset(current: DatasetMap, official: OfficialSyncPayload): DatasetMap {
-  const importedGames = current.games.filter((game) => game.competition === LIGA_DOS_COMPETITION && isUploadedGame(game.gameId, game.notes));
+function replaceCompetitionDataset(current: DatasetMap, official: OfficialSyncPayload, competition: CompetitionKey): DatasetMap {
+  const importedGames = current.games.filter((game) => game.competition === competition && isUploadedGame(game.gameId, game.notes));
   const importedByFixture = new Map(importedGames.map((game) => [fixtureKey(game), game]));
   const importedByMatchId = new Map<string, GameRow>();
   importedGames.forEach((game) => {
@@ -836,15 +902,15 @@ function replaceLigaDosDataset(current: DatasetMap, official: OfficialSyncPayloa
 
   return {
     teams: [
-      ...current.teams.filter((team) => team.competition !== LIGA_DOS_COMPETITION),
+      ...current.teams.filter((team) => team.competition !== competition),
       ...official.teams
     ],
     players: [
-      ...current.players.filter((player) => player.competition !== LIGA_DOS_COMPETITION),
+      ...current.players.filter((player) => player.competition !== competition),
       ...official.players
     ],
     games: [
-      ...current.games.filter((game) => game.competition !== LIGA_DOS_COMPETITION),
+      ...current.games.filter((game) => game.competition !== competition),
       ...mergedOfficialGames,
       ...preservedImportedGames
     ],
@@ -854,34 +920,35 @@ function replaceLigaDosDataset(current: DatasetMap, official: OfficialSyncPayloa
 }
 
 function migrateStoredDataset(current: DatasetMap): DatasetMap {
-  const hasOfficialSync = current.teams.some((team) => team.competition === LIGA_DOS_COMPETITION && team.teamId.startsWith("GENIUS-"));
+  const normalizedCurrent = applyBoxscoreImports(current, []);
+  const hasOfficialSync = normalizedCurrent.teams.some((team) => team.competition === LIGA_DOS_COMPETITION && team.teamId.startsWith("GENIUS-"));
 
   if (hasOfficialSync) {
-    return { ...current, playerGameStats: current.playerGameStats ?? [], shots: current.shots ?? [] };
+    return { ...normalizedCurrent, playerGameStats: normalizedCurrent.playerGameStats ?? [], shots: normalizedCurrent.shots ?? [] };
   }
 
   const seedLigaTeams = seedData.teams.filter((team) => team.competition === LIGA_DOS_COMPETITION);
   const seedLigaPlayers = seedData.players.filter((player) => player.competition === LIGA_DOS_COMPETITION);
   const seedLigaGames = seedData.games.filter((game) => game.competition === LIGA_DOS_COMPETITION);
-  const importedGames = current.games.filter((game) => game.competition === LIGA_DOS_COMPETITION && isUploadedGame(game.gameId, game.notes));
+  const importedGames = normalizedCurrent.games.filter((game) => game.competition === LIGA_DOS_COMPETITION && isUploadedGame(game.gameId, game.notes));
   const importedKeys = new Set(importedGames.map(fixtureKey));
 
   return {
     teams: [
-      ...current.teams.filter((team) => team.competition !== LIGA_DOS_COMPETITION),
+      ...normalizedCurrent.teams.filter((team) => team.competition !== LIGA_DOS_COMPETITION),
       ...seedLigaTeams
     ],
     players: [
-      ...current.players.filter((player) => player.competition !== LIGA_DOS_COMPETITION),
+      ...normalizedCurrent.players.filter((player) => player.competition !== LIGA_DOS_COMPETITION),
       ...seedLigaPlayers
     ],
     games: [
-      ...current.games.filter((game) => game.competition !== LIGA_DOS_COMPETITION),
+      ...normalizedCurrent.games.filter((game) => game.competition !== LIGA_DOS_COMPETITION),
       ...seedLigaGames.filter((game) => !importedKeys.has(fixtureKey(game))),
       ...importedGames
     ],
-    playerGameStats: current.playerGameStats ?? [],
-    shots: current.shots ?? []
+    playerGameStats: normalizedCurrent.playerGameStats ?? [],
+    shots: normalizedCurrent.shots ?? []
   };
 }
 
@@ -1442,6 +1509,7 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
   const red: PdfRgb = [0.88, 0.11, 0.28];
   const own = model.ownTeam.team;
   const rival = model.rivalTeam.team;
+  const dossierLeague = competitionCopy(own.competition as CompetitionKey);
   const topThreat = model.rivalPlayers[0];
   const topOwn = model.ownPlayers[0];
   const bestQuarter = [...model.quarterModel].sort((a, b) => b.differential - a.differential)[0];
@@ -1484,7 +1552,7 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
   addText(cover, "DOS SCOUT PRO", 38, 493, 10, [0.96, 0.85, 0.25], "F2");
   addText(cover, "BRIEFING DE PARTIDO", 38, 462, 11, [0.78, 0.82, 0.78], "F2");
   addWrappedText(cover, `${own.name} vs ${rival.name}`, 38, 410, 285, 34, [1, 1, 1], "F2", 36, 3);
-  addText(cover, `Liga DOS Chile · generado ${generatedAt}`, 40, 284, 11, [0.78, 0.82, 0.78], "F1");
+  addText(cover, `${dossierLeague.label} · generado ${generatedAt}`, 40, 284, 11, [0.78, 0.82, 0.78], "F1");
   addWrappedText(cover, model.rivalIdentity.summary, 40, 240, 285, 17, [1, 1, 1], "F2", 20, 4);
   addPill(cover, confidencePdf(model.rivalIdentity.evidence, model.rivalIdentity.confidence), 40, 138, [1, 0.96, 0.82], [0.5, 0.32, 0.02], 198);
   addText(cover, "No es un reporte de numeros. Es una hoja de decisiones para ganar tiempo de staff.", 40, 94, 10, [0.78, 0.82, 0.78], "F1");
@@ -1779,6 +1847,8 @@ export function ScoutingPlatform() {
   const [sourceTrace, setSourceTrace] = useState<SourceTrace[]>([]);
   const [role, setRole] = useState<UserRole>("admin");
   const [tab, setTab] = useState<TabKey>("Dashboard");
+  const [activeCompetition, setActiveCompetition] = useState<ScoutingCompetitionKey>(LIGA_DOS_COMPETITION as ScoutingCompetitionKey);
+  const [leagueMenuOpen, setLeagueMenuOpen] = useState(false);
   const [ownTeam, setOwnTeam] = useState("Sportiva Italiana");
   const [rivalTeam, setRivalTeam] = useState("Illapel Basquetbol");
   const [range, setRange] = useState<RangeKey>("Ultimos 5 partidos");
@@ -1826,7 +1896,8 @@ export function ScoutingPlatform() {
     window.localStorage.setItem("dos-premium-notes-v1", JSON.stringify(notes));
   }, [notes, storageReady]);
 
-  const competition = LIGA_DOS_COMPETITION as CompetitionKey;
+  const competition = activeCompetition as CompetitionKey;
+  const leagueCopy = competitionCopy(competition);
   const teams = data.teams.filter((team) => team.competition === competition);
   const isPlayerView = role === "jugador";
   const canAdmin = role === "admin";
@@ -1842,6 +1913,35 @@ export function ScoutingPlatform() {
     [competition, data, ownTeam, rivalTeam, scoutingFilters, sourceTrace]
   );
 
+  useEffect(() => {
+    const competitionTeams = data.teams.filter((team) => team.competition === activeCompetition);
+    if (competitionTeams.length === 0) {
+      return;
+    }
+    const hasOwn = competitionTeams.some((team) => team.name === ownTeam);
+    const nextOwn = hasOwn ? ownTeam : competitionTeams[0].name;
+    const hasRival = competitionTeams.some((team) => team.name === rivalTeam);
+    const nextRival =
+      hasRival && rivalTeam !== nextOwn
+        ? rivalTeam
+        : competitionTeams.find((team) => team.name !== nextOwn)?.name ?? nextOwn;
+    if (nextOwn !== ownTeam) {
+      setOwnTeam(nextOwn);
+    }
+    if (nextRival !== rivalTeam) {
+      setRivalTeam(nextRival);
+    }
+  }, [activeCompetition, data.teams, ownTeam, rivalTeam]);
+
+  useEffect(() => {
+    setSelectedShotPlayer("");
+    setShotGameFilter("Todos");
+    setUrls("");
+    setOfficialSyncStatus(`Base oficial ${competitionCopy(activeCompetition).shortLabel} lista para sincronizar standings, equipos, rosters y fixture.`);
+    setIngestStatus(`Listo para pegar links FEBACHILE / Genius Sports de ${competitionCopy(activeCompetition).shortLabel}.`);
+    setShotImportStatus(`Carta de tiro lista para generar desde los partidos oficiales del rival en ${competitionCopy(activeCompetition).shortLabel}.`);
+  }, [activeCompetition]);
+
   const handleImport = async () => {
     const parsedUrls = urls
       .split(/\n|,/)
@@ -1853,7 +1953,7 @@ export function ScoutingPlatform() {
       return;
     }
 
-    setIngestStatus("Procesando tabla Genius, links de Estadisticas completas y boxscores...");
+    setIngestStatus(`Procesando tabla Genius, links de Estadisticas completas y boxscores de ${leagueCopy.shortLabel}...`);
     const response = await fetch("/api/import-boxscores", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1869,7 +1969,7 @@ export function ScoutingPlatform() {
           id: `${item.game.gameId}-${now}`,
           sourceUrl: item.sourceUrl,
           loadedAt: now,
-          loadedBy: "Admin Liga DOS",
+          loadedBy: `Admin ${leagueCopy.shortLabel}`,
           status: "procesado" as const,
           confirmedFields: ["equipos", "marcador", "jugadores", "minutos", "puntos", "rebotes", "asistencias", "carta de tiro"],
           inferredFields: ["rol estimado", "rotacion probable", "cuartos proyectados", "amenaza rival"],
@@ -1882,7 +1982,7 @@ export function ScoutingPlatform() {
     const shotEventsImported = payload.imports.reduce((total, item) => total + (item.shots?.length ?? 0), 0);
     setIngestStatus(
       `Procesados ${payload.imports.length} links · ${shotEventsImported} tiros de Carta de tiro capturados. ${
-        payload.errors.length > 0 ? `Observaciones: ${payload.errors.join(" | ")}` : "Datos persistidos en la base local del MVP."
+        payload.errors.length > 0 ? `Observaciones: ${payload.errors.join(" | ")}` : `Datos persistidos en la base local de ${leagueCopy.shortLabel}.`
       }`
     );
   };
@@ -1894,10 +1994,10 @@ export function ScoutingPlatform() {
     }
 
     const rivalName = model.rivalTeam.team.name;
-    const targetUrls = Array.from(new Set(rivalSampleGames.map(dataUrlFromGame).filter((url): url is string => Boolean(url))));
+    const targetUrls = Array.from(new Set(rivalShotImportGames.map(dataUrlFromGame).filter((url): url is string => Boolean(url))));
 
     if (targetUrls.length === 0) {
-      setShotImportStatus("No encontre IDs oficiales en la muestra. Primero sincroniza Liga DOS oficial o pega links de Estadisticas completas en Carga.");
+      setShotImportStatus(`No encontre IDs oficiales en la muestra. Primero sincroniza ${leagueCopy.shortLabel} oficial o pega links de Estadisticas completas en Carga.`);
       return;
     }
 
@@ -1925,7 +2025,7 @@ export function ScoutingPlatform() {
             id: `${item.game.gameId}-shots-${now}`,
             sourceUrl: item.sourceUrl,
             loadedAt: now,
-            loadedBy: "Admin Liga DOS",
+            loadedBy: `Admin ${leagueCopy.shortLabel}`,
             status: "procesado" as const,
             confirmedFields: ["carta de tiro", "jugadores", "marcador", "minutos", "puntos"],
             inferredFields: ["zonas dominantes", "plan defensivo por jugador", "tendencia por cuarto"],
@@ -1949,10 +2049,14 @@ export function ScoutingPlatform() {
   };
 
   const handleOfficialSync = async () => {
-    setOfficialSyncStatus("Sincronizando interfaces oficiales de Genius: equipos, standings por zona, fixture, rosters y estadisticas por equipo...");
+    setOfficialSyncStatus(`Sincronizando ${leagueCopy.shortLabel}: equipos, standings, fixture, rosters y estadisticas por equipo desde Genius...`);
 
     try {
-      const response = await fetch("/api/sync-liga-dos", { method: "POST" });
+      const response = await fetch("/api/sync-liga-dos", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ competition })
+      });
       const payload = (await response.json()) as OfficialSyncPayload;
 
       if (!response.ok || payload.error) {
@@ -1960,14 +2064,14 @@ export function ScoutingPlatform() {
         return;
       }
 
-      setData((current) => replaceLigaDosDataset(current, payload));
+      setData((current) => replaceCompetitionDataset(current, payload, competition));
       const now = payload.syncedAt ?? new Date().toISOString();
       setSourceTrace((current) => [
         {
-          id: `liga-dos-official-${now}`,
-          sourceUrl: "https://clnb.web.geniussports.com/?p=9&WHurl=%2Fcompetition%2F48159%2Fstandings",
+          id: `${competition}-official-${now}`,
+          sourceUrl: leagueCopy.sourceUrl,
           loadedAt: now,
-          loadedBy: "Admin Liga DOS",
+          loadedBy: `Admin ${leagueCopy.shortLabel}`,
           status: "procesado",
           confirmedFields: [
             "equipos",
@@ -1983,7 +2087,7 @@ export function ScoutingPlatform() {
         ...current
       ]);
       setOfficialSyncStatus(
-        `Sincronizacion oficial completa: ${payload.teams.length} equipos, ${payload.players.length} jugadores y ${payload.games.length} partidos desde ${payload.sources.join(", ")}.`
+        `Sincronizacion oficial ${leagueCopy.shortLabel} completa: ${payload.teams.length} equipos, ${payload.players.length} jugadores y ${payload.games.length} partidos desde ${payload.sources.join(", ")}.`
       );
     } catch (error) {
       setOfficialSyncStatus(error instanceof Error ? error.message : "Fallo inesperado al sincronizar Genius.");
@@ -2016,12 +2120,18 @@ export function ScoutingPlatform() {
     }
   };
 
+  const handleCompetitionChange = (nextCompetition: ScoutingCompetitionKey) => {
+    setActiveCompetition(nextCompetition);
+    setLeagueMenuOpen(false);
+  };
+
   if (!model) {
     return (
       <main className="premium-shell">
         <section className="module-panel">
-          <p className="eyebrow">Liga DOS Chile</p>
+          <p className="eyebrow">{leagueCopy.label}</p>
           <h1>Faltan equipos para construir el modelo de scouting.</h1>
+          <button className="primary-button" onClick={handleOfficialSync} type="button">Sincronizar {leagueCopy.shortLabel}</button>
         </section>
       </main>
     );
@@ -2056,11 +2166,11 @@ export function ScoutingPlatform() {
     }
     return getPointDifferential(teamB) - getPointDifferential(teamA);
   });
-  const selectedZone = model.ownTeam.team.zone || model.rivalTeam.team.zone;
-  const zoneStandings = standings.filter((team) => team.zone === selectedZone);
-  const groupedStandings = Array.from(new Set(standings.map((team) => team.zone).filter(Boolean))).map((zone) => ({
+  const selectedZone = displayZoneForTeam(model.ownTeam.team) || displayZoneForTeam(model.rivalTeam.team);
+  const zoneStandings = standings.filter((team) => displayZoneForTeam(team) === selectedZone);
+  const groupedStandings = Array.from(new Set(standings.map((team) => displayZoneForTeam(team)).filter(Boolean))).map((zone) => ({
     zone,
-    teams: standings.filter((team) => team.zone === zone)
+    teams: standings.filter((team) => displayZoneForTeam(team) === zone)
   }));
   const competitionGames = data.games
     .filter((game) => game.competition === competition)
@@ -2083,7 +2193,11 @@ export function ScoutingPlatform() {
       return true;
     })
     .slice(0, scoutingFilters.sampleSize);
-  const shotGameOptions = rivalSampleGames
+  const rivalFinalGames = competitionGames
+    .filter((game) => game.status === "Final" && (areSameTeam(game.homeTeam, model.rivalTeam.team.name) || areSameTeam(game.awayTeam, model.rivalTeam.team.name)))
+    .slice(0, Math.max(scoutingFilters.sampleSize, 8));
+  const rivalShotImportGames = rivalSampleGames.length > 0 ? rivalSampleGames : rivalFinalGames;
+  const shotGameOptions = rivalShotImportGames
     .map((game) => {
       const value = matchIdFromGame(game) ?? game.gameId;
       const rivalIsHome = areSameTeam(game.homeTeam, model.rivalTeam.team.name);
@@ -2100,20 +2214,24 @@ export function ScoutingPlatform() {
     .filter((option, index, options) => options.findIndex((item) => item.value === option.value) === index);
   const shotGameOptionValues = new Set(shotGameOptions.map((option) => option.value));
   const activeShotGameFilter = shotGameFilter === "Todos" || shotGameOptionValues.has(shotGameFilter) ? shotGameFilter : "Todos";
-  const rivalSampleGameIds = new Set(rivalSampleGames.map((game) => game.gameId));
-  const rivalSampleMatchIds = new Set(rivalSampleGames.map(matchIdFromGame).filter((matchId): matchId is string => Boolean(matchId)));
-  const rivalShots = (data.shots ?? []).filter((shot) => {
+  const rivalSampleGameIds = new Set(rivalShotImportGames.map((game) => game.gameId));
+  const rivalSampleMatchIds = new Set(rivalShotImportGames.map(matchIdFromGame).filter((matchId): matchId is string => Boolean(matchId)));
+  const allRivalShots = (data.shots ?? []).filter((shot) => shot.competition === competition && areSameTeam(shot.teamName, model.rivalTeam.team.name));
+  const sampleRivalShots = allRivalShots.filter((shot) => {
     const shotMatchId = matchIdFromShot(shot);
     const belongsToSample =
       rivalSampleGameIds.has(shot.gameId) || Boolean(shotMatchId && rivalSampleMatchIds.has(shotMatchId));
-    return shot.competition === competition && areSameTeam(shot.teamName, model.rivalTeam.team.name) && belongsToSample;
+    return belongsToSample;
   });
-  const rivalPlayerGameStats = (data.playerGameStats ?? []).filter((stat) => {
+  const rivalShots = sampleRivalShots.length > 0 ? sampleRivalShots : allRivalShots;
+  const allRivalPlayerGameStats = (data.playerGameStats ?? []).filter((stat) => stat.competition === competition && areSameTeam(stat.teamName, model.rivalTeam.team.name));
+  const sampleRivalPlayerGameStats = allRivalPlayerGameStats.filter((stat) => {
     const statMatchId = matchIdFromPlayerGameStat(stat);
     const belongsToSample =
       rivalSampleGameIds.has(stat.gameId) || Boolean(statMatchId && rivalSampleMatchIds.has(statMatchId));
-    return stat.competition === competition && areSameTeam(stat.teamName, model.rivalTeam.team.name) && belongsToSample;
+    return belongsToSample;
   });
+  const rivalPlayerGameStats = sampleRivalPlayerGameStats.length > 0 ? sampleRivalPlayerGameStats : allRivalPlayerGameStats;
   const filterShotsByGame = (shots: ShotRow[]) => {
     if (activeShotGameFilter === "Todos") {
       return shots;
@@ -2135,7 +2253,9 @@ export function ScoutingPlatform() {
     return player ? `${formatMinutes(player.minutes)}/PJ` : "min s/d";
   };
   const activeRivalShots = filterShotsByGame(rivalShots);
-  const activeShotGameCount = activeShotGameFilter === "Todos" ? rivalSampleGames.length : Math.min(rivalSampleGames.length, 1);
+  const activeShotGameCount = activeShotGameFilter === "Todos"
+    ? Math.max(rivalShotImportGames.length, new Set(activeRivalShots.map((shot) => matchIdFromShot(shot) ?? shot.gameId)).size)
+    : 1;
   const mainThreatName = model.rivalPlayers[0]?.name;
   const starterNamesAfterThreat = model.rivalRotation.starters
     .filter((name) => !mainThreatName || !sameShotPlayer(name, mainThreatName))
@@ -2272,8 +2392,44 @@ export function ScoutingPlatform() {
     <main className="premium-shell" style={teamThemeFor(model.ownTeam.team.name)}>
       <section className="premium-hero">
         <div className="hero-main">
-          <p className="eyebrow">Liga DOS Chile · Scouting privado</p>
-          <h1>Scouting tactico Liga DOS.</h1>
+          <p className="eyebrow">{leagueCopy.kicker}</p>
+          <div className="league-title">
+            <h1>Scouting tactico</h1>
+            <div className={`league-title-picker ${leagueMenuOpen ? "open" : ""}`}>
+              <button
+                aria-expanded={leagueMenuOpen}
+                aria-haspopup="listbox"
+                className="league-title-select"
+                onClick={() => setLeagueMenuOpen((current) => !current)}
+                type="button"
+              >
+                <small>Liga activa</small>
+                <strong>{leagueCopy.shortLabel}</strong>
+              </button>
+              {leagueMenuOpen ? (
+                <div className="league-menu" role="listbox">
+                  {SCOUTING_COMPETITIONS.map((item) => {
+                    const itemCopy = competitionCopy(item);
+                    const selected = item === activeCompetition;
+                    return (
+                      <button
+                        aria-selected={selected}
+                        className={selected ? "selected" : ""}
+                        key={item}
+                        onClick={() => handleCompetitionChange(item)}
+                        role="option"
+                        type="button"
+                      >
+                        <span>{selected ? "Activo" : "Cambiar a"}</span>
+                        <strong>{itemCopy.shortLabel}</strong>
+                        <small>{itemCopy.label}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          </div>
           <p>
             Datos oficiales, inferencias auditables y reportes PDF para preparar rival, rotacion y plan de partido.
           </p>
@@ -2291,6 +2447,7 @@ export function ScoutingPlatform() {
           <span>Perfil activo</span>
           <strong>{role}</strong>
           <small>{model.ownTeam.team.name}</small>
+          <small>{leagueCopy.shortLabel}</small>
           <select value={role} onChange={(event) => handleRoleChange(event.target.value as UserRole)}>
             {Object.keys(roleCapabilities).map((item) => (
               <option key={item} value={item}>
@@ -2302,6 +2459,16 @@ export function ScoutingPlatform() {
       </section>
 
       <section className="control-bar">
+        <label>
+          Liga
+          <select value={activeCompetition} onChange={(event) => setActiveCompetition(event.target.value as ScoutingCompetitionKey)}>
+            {SCOUTING_COMPETITIONS.map((item) => (
+              <option key={item} value={item}>
+                {competitionCopy(item).shortLabel}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           Equipo propio
           <select value={ownTeam} onChange={(event) => setOwnTeam(event.target.value)}>
@@ -2409,7 +2576,7 @@ export function ScoutingPlatform() {
           <PlayerImpactCard label="Ventaja propia" player={ownLead} tone="advantage" />
           <section className="module-panel standings-panel">
             <div className="module-heading">
-              <p className="eyebrow">Tabla Liga DOS · {selectedZone}</p>
+              <p className="eyebrow">Tabla {leagueCopy.shortLabel} · {selectedZone}</p>
               <h3>Como va la zona</h3>
             </div>
             <div className="standings-list">
@@ -2417,7 +2584,7 @@ export function ScoutingPlatform() {
                 <article className="standing-row" key={team.teamId}>
                   <span>{index + 1}</span>
                   <strong>{team.name}</strong>
-                  <small>{team.zone} · {team.gamesPlayed} PJ</small>
+                  <small>{displayZoneForTeam(team)} · {team.gamesPlayed} PJ</small>
                   <b>{team.wins}-{team.losses}</b>
                   <em>{getPointDifferential(team).toFixed(1)}</em>
                 </article>
@@ -2484,7 +2651,7 @@ export function ScoutingPlatform() {
             <EvidencePill evidence="dato confirmado" confidence={uploadedGames.length > 0 ? uploadedGames.length / Math.max(competitionGames.length, 1) : 0} />
           </div>
           <div className="load-summary">
-            <MetricTile label="Equipos oficiales" value={String(teams.length)} caption="Liga DOS separada por zonas" />
+            <MetricTile label="Equipos oficiales" value={String(teams.length)} caption={`${leagueCopy.shortLabel} separada por zonas o fase`} />
             <MetricTile label="Jugadores en base" value={String(competitionPlayers.length)} caption="Rosters y estadisticas por equipo" />
             <MetricTile label="Partidos en base" value={String(competitionGames.length)} caption="Fixture, resultados e imports locales" />
             <MetricTile label="Boxscores subidos" value={String(uploadedGames.length)} caption="Listos para scouting de jugadores y rotacion" />
@@ -2492,7 +2659,7 @@ export function ScoutingPlatform() {
           </div>
           {canAdmin ? (
             <div className="sync-strip">
-              <button className="primary-button" onClick={handleOfficialSync} type="button">Sincronizar Liga DOS oficial</button>
+              <button className="primary-button" onClick={handleOfficialSync} type="button">Sincronizar {leagueCopy.shortLabel} oficial</button>
               <p>{officialSyncStatus}</p>
             </div>
           ) : null}
@@ -2537,7 +2704,7 @@ export function ScoutingPlatform() {
           <section className="module-panel zone-board">
             <div className="module-heading">
               <p className="eyebrow">Standings por zona</p>
-              <h3>Liga DOS separada por grupos</h3>
+              <h3>{leagueCopy.shortLabel} separada por grupos</h3>
             </div>
             <div className="zone-board-grid">
               {groupedStandings.map((group) => (
@@ -2556,7 +2723,7 @@ export function ScoutingPlatform() {
           {[model.ownTeam, model.rivalTeam].map((team) => (
             <section className="module-panel" key={team.team.teamId}>
               <div className="module-heading">
-                <p className="eyebrow">{team.team.zone}</p>
+                <p className="eyebrow">{displayZoneForTeam(team.team)}</p>
                 <h3>{team.team.name}</h3>
               </div>
               <div className="stat-stack">
@@ -2726,7 +2893,7 @@ export function ScoutingPlatform() {
                 {canAdmin ? (
                   <button
                     className="secondary-button"
-                    disabled={isShotImporting || rivalSampleGames.length === 0}
+                    disabled={isShotImporting || rivalShotImportGames.length === 0}
                     onClick={handleShotAutoImport}
                     type="button"
                   >
@@ -2744,7 +2911,7 @@ export function ScoutingPlatform() {
               </div>
             </div>
             <div className="shot-summary-strip">
-              <MetricTile label="Rival" value={model.rivalTeam.team.name} caption={model.rivalTeam.team.zone} />
+              <MetricTile label="Rival" value={model.rivalTeam.team.name} caption={displayZoneForTeam(model.rivalTeam.team)} />
               <MetricTile label="Muestra" value={`${activeShotGameCount} PJ`} caption={`${activeShotGameFilter === "Todos" ? range : "Partido seleccionado"} · ${activeRivalShots.length} tiros rival`} />
               <MetricTile label="Tiros jugador" value={String(activeShotSummary.attempts)} caption={`Promedio ${roundOne(activeShotSummary.attempts / Math.max(activeShotGameCount, 1))} por partido`} />
               <MetricTile label="Acierto" value={activeShotSummary.efficiency} caption={`${activeShotSummary.made}/${activeShotSummary.attempts} convertidos`} />
@@ -2784,7 +2951,7 @@ export function ScoutingPlatform() {
               <details className="shot-trace">
                 <summary>Partidos y confiabilidad</summary>
                 <p>
-                  Muestra actual de {model.rivalTeam.team.name}: {rivalSampleGames.map((game) => `${game.homeTeam} ${game.homeScore}-${game.awayScore} ${game.awayTeam}`).join(" · ") || "sin partidos oficiales"}.
+                  Partidos oficiales disponibles de {model.rivalTeam.team.name}: {rivalShotImportGames.map((game) => `${game.homeTeam} ${game.homeScore}-${game.awayScore} ${game.awayTeam}`).join(" · ") || "sin partidos oficiales"}.
                   Dato confirmado solo cuando el partido trae coordenadas de Carta de tiro en Genius/FIBA.
                 </p>
               </details>
@@ -3129,28 +3296,28 @@ export function ScoutingPlatform() {
             {[
               {
                 kind: "prepartido" as const,
-                filename: "dossier-tactico-pro-liga-dos.pdf",
+                filename: `dossier-tactico-pro-${competitionFileSlug(competition)}.pdf`,
                 title: "Dossier tactico pro",
                 description: "Dossier visual de 15 diapositivas: decisiones, forma, base temporada, rotaciones, planes individuales, carta de tiro y validacion.",
                 staffOnly: true
               },
               {
                 kind: "tecnico" as const,
-                filename: "reporte-tecnico-largo-liga-dos.pdf",
+                filename: `reporte-tecnico-largo-${competitionFileSlug(competition)}.pdf`,
                 title: "Reporte tecnico largo",
                 description: "Version profunda con diagnostico, riesgos, video tags, trazabilidad y control de datos.",
                 staffOnly: true
               },
               {
                 kind: "postpartido" as const,
-                filename: "informe-postpartido-premium-liga-dos.pdf",
+                filename: `informe-postpartido-premium-${competitionFileSlug(competition)}.pdf`,
                 title: "Informe postpartido",
                 description: "Lectura de validacion, objetivos de control y acciones para la semana.",
                 staffOnly: true
               },
               {
                 kind: "resumen" as const,
-                filename: "informe-express-liga-dos.pdf",
+                filename: `informe-express-${competitionFileSlug(competition)}.pdf`,
                 title: "Informe express",
                 description: "Version corta para jugadores y staff, enfocada en 3-4 claves accionables.",
                 staffOnly: false
@@ -3235,8 +3402,8 @@ export function ScoutingPlatform() {
             </div>
             <div className="official-sync-card">
               <div>
-                <strong>Base oficial Liga DOS</strong>
-                <p>Actualiza equipos, tabla por zonas, fixture, rosters y estadisticas de jugador desde las interfaces oficiales de Genius.</p>
+                <strong>Base oficial {leagueCopy.shortLabel}</strong>
+                <p>Actualiza equipos, tabla por zonas o fase, fixture, rosters y estadisticas de jugador desde las interfaces oficiales de Genius.</p>
               </div>
               <button className="primary-button" onClick={handleOfficialSync} type="button">Sincronizar oficial</button>
             </div>
@@ -3244,7 +3411,7 @@ export function ScoutingPlatform() {
             <textarea
               className="source-textarea"
               onChange={(event) => setUrls(event.target.value)}
-              placeholder={"https://clnb.web.geniussports.com/?p=9&WHurl=%2Fcompetition%2F48159%2Fschedule\nhttps://clnb.web.geniussports.com/?p=9&WHurl=%2Fcompetition%2F48159%2Fmatch%2F2809987%2Fsummary%3F\nhttps://fibalivestats.dcd.shared.geniussports.com/u/CLNB/2809987/"}
+              placeholder={`https://clnb.web.geniussports.com/?p=9&WHurl=%2Fcompetition%2F${leagueCopy.placeholderId}%2Fschedule\nhttps://clnb.web.geniussports.com/?p=9&WHurl=%2Fcompetition%2F${leagueCopy.placeholderId}%2Fmatch%2F2809987%2Fsummary%3F\nhttps://fibalivestats.dcd.shared.geniussports.com/u/CLNB/2809987/`}
               value={urls}
             />
             <button className="primary-button" onClick={handleImport} type="button">Analizar, normalizar y guardar</button>

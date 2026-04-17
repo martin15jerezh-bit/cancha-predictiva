@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
-import { areSameTeam, LIGA_DOS_COMPETITION, seedData } from "@/lib/data";
-import { GameRow, PlayerRow, TeamRow } from "@/lib/types";
+import { areSameTeam, competitionLabels, CURRENT_COMPETITION, LIGA_DOS_COMPETITION, seedData } from "@/lib/data";
+import { CompetitionKey, GameRow, PlayerRow, TeamRow } from "@/lib/types";
 
-const COMPETITION_ID = "48159";
-const COMPETITION = LIGA_DOS_COMPETITION;
-const ZONES = ["Zona A", "Zona B", "Zona C", "Zona D"];
-const EMBED_BASE = `https://hosted.dcd.shared.geniussports.com/embednf/FDBCH/es/competition/${COMPETITION_ID}`;
 const IURL = "https://clnb.web.geniussports.com/?p=9";
+
+type CompetitionSyncConfig = {
+  competition: CompetitionKey;
+  competitionId: string;
+  label: string;
+  defaultZone: string;
+  phases: string[];
+  aliases: Record<string, string>;
+};
 
 type OfficialTeam = {
   id: string;
@@ -47,7 +52,7 @@ type PlayerInfo = {
   games?: string;
 };
 
-const officialAliases: Record<string, string> = {
+const ligaDosAliases: Record<string, string> = {
   "ARABE VALPARAISO": "Arabe de Valparaiso",
   "CD ALEMAN DE CONCEPCION": "Aleman de Concepcion",
   "CD HRVATSKI SOKOL": "Hrvatski Sokol",
@@ -61,6 +66,45 @@ const officialAliases: Record<string, string> = {
   "THE SHARKS": "CD Sharks",
   "UDE TEMUCO": "UDE Temuco"
 };
+
+const lnbAliases: Record<string, string> = {
+  "CD UNIV. CONCEPCION": "Universidad de Concepcion",
+  "CD UNIVERSIDAD DE CONCEPCION": "Universidad de Concepcion",
+  "CD UNIV. CATOLICA": "Universidad Catolica",
+  "CD UNIVERSIDAD CATOLICA": "Universidad Catolica",
+  "CD ESPANOL OSORNO": "Espanol de Osorno",
+  "CD ESPAÑOL OSORNO": "Espanol de Osorno",
+  "CD ESPANOL TALCA": "Espanol de Talca",
+  "CD ESPAÑOL TALCA": "Espanol de Talca",
+  "CSD COLO COLO": "Colo-Colo",
+  "CD COLO COLO": "Colo-Colo"
+};
+
+const syncConfigs: Record<string, CompetitionSyncConfig> = {
+  [LIGA_DOS_COMPETITION]: {
+    competition: LIGA_DOS_COMPETITION,
+    competitionId: "48159",
+    label: "Liga DOS",
+    defaultZone: "Liga DOS",
+    phases: ["Zona A", "Zona B", "Zona C", "Zona D"],
+    aliases: ligaDosAliases
+  },
+  [CURRENT_COMPETITION]: {
+    competition: CURRENT_COMPETITION,
+    competitionId: "48076",
+    label: "LNB Chile",
+    defaultZone: "LNB Chile",
+    phases: ["Conferencia Centro", "Conferencia Sur"],
+    aliases: lnbAliases
+  }
+};
+
+function getSyncConfig(value?: CompetitionKey) {
+  const competition = competitionLabels.includes(value ?? LIGA_DOS_COMPETITION)
+    ? value ?? LIGA_DOS_COMPETITION
+    : LIGA_DOS_COMPETITION;
+  return syncConfigs[competition] ?? syncConfigs[LIGA_DOS_COMPETITION];
+}
 
 function decodeHtml(value: string) {
   return value
@@ -87,17 +131,36 @@ function slugify(value: string) {
     .replace(/^-|-$/g, "");
 }
 
-function canonicalTeamName(officialName: string) {
+function canonicalTeamName(officialName: string, config: CompetitionSyncConfig) {
   const normalized = officialName.trim().toUpperCase();
-  const existing = seedData.teams.find((team) => team.competition === COMPETITION && areSameTeam(team.name, officialName));
-  return officialAliases[normalized] ?? existing?.name ?? officialName
+  const existing = seedData.teams.find((team) => team.competition === config.competition && areSameTeam(team.name, officialName));
+  return config.aliases[normalized] ?? existing?.name ?? officialName
     .toLowerCase()
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-async function fetchEmbed(page: string) {
+function inferredLnbZone(teamName: string) {
+  const normalized = slugify(teamName);
+  if (/(osorno|animas|valdivia|puerto-varas|puerto-montt|ancud|castro)/.test(normalized)) {
+    return "Conferencia Sur";
+  }
+  if (/(concepcion|puente-alto|leones|boston|colo-colo|catolica|talca)/.test(normalized)) {
+    return "Conferencia Centro";
+  }
+  return "LNB Chile";
+}
+
+function resolvedTeamZone(config: CompetitionSyncConfig, teamName: string, standing?: StandingInfo, existing?: TeamRow) {
+  if (config.competition === CURRENT_COMPETITION) {
+    return existing?.zone ?? inferredLnbZone(teamName);
+  }
+  return standing?.zone ?? existing?.zone ?? config.defaultZone;
+}
+
+async function fetchEmbed(page: string, config: CompetitionSyncConfig) {
   const separator = page.includes("?") ? "&" : "?";
-  const url = `${EMBED_BASE}${page}${separator}iurl=${encodeURIComponent(IURL)}&_cc=1&_lc=1&_nv=1&_mf=1`;
+  const embedBase = `https://hosted.dcd.shared.geniussports.com/embednf/FDBCH/es/competition/${config.competitionId}`;
+  const url = `${embedBase}${page}${separator}iurl=${encodeURIComponent(IURL)}&_cc=1&_lc=1&_nv=1&_mf=1`;
   const response = await fetch(url, {
     cache: "no-store",
     headers: { "user-agent": "DOS Scout Pro/0.2" }
@@ -115,7 +178,7 @@ function getCells(row: string) {
   return [...row.matchAll(/<td[\s\S]*?<\/td>/g)].map((cell) => stripTags(cell[0]));
 }
 
-function parseOfficialTeams(html: string): OfficialTeam[] {
+function parseOfficialTeams(html: string, config: CompetitionSyncConfig): OfficialTeam[] {
   return [...html.matchAll(/<div class="team-link">([\s\S]*?)<\/div>/g)]
     .map((match) => {
       const block = match[1];
@@ -128,7 +191,7 @@ function parseOfficialTeams(html: string): OfficialTeam[] {
       return {
         id,
         name: stripTags(name),
-        canonicalName: canonicalTeamName(stripTags(name)),
+        canonicalName: canonicalTeamName(stripTags(name), config),
         logoUrl
       };
     })
@@ -162,7 +225,7 @@ function parseStandings(html: string, zone: string) {
   });
 }
 
-function parseTeamTotals(html: string) {
+function parseTeamTotals(html: string, config: CompetitionSyncConfig) {
   const totals = new Map<string, { reboundsPerGame: string; assistsPerGame: string }>();
   const rows = [...html.matchAll(/<tr>\s*<td class="team-name">[\s\S]*?<\/tr>/g)].map((match) => match[0]);
   rows.forEach((row) => {
@@ -172,7 +235,7 @@ function parseTeamTotals(html: string) {
     const assists = Number(cells[18] ?? 0);
     const games = Number(cells[20] ?? 0);
     if (teamName && games > 0) {
-      totals.set(canonicalTeamName(teamName), {
+      totals.set(canonicalTeamName(teamName, config), {
         reboundsPerGame: (rebounds / games).toFixed(1),
         assistsPerGame: (assists / games).toFixed(1)
       });
@@ -238,7 +301,7 @@ function parseTeamPlayerStats(html: string) {
   return stats;
 }
 
-function parseSchedule(html: string, zone: string): GameRow[] {
+function parseSchedule(html: string, zone: string, config: CompetitionSyncConfig): GameRow[] {
   const parts = html.split(/<div class="match-wrap/).slice(1);
   return parts.map((part) => {
     const block = `<div class="match-wrap${part}`;
@@ -247,12 +310,12 @@ function parseSchedule(html: string, zone: string): GameRow[] {
     const [day, rawMonth, year, time] = dateText.split(/\s+/);
     const month = { "mar.": "03", "abr.": "04", "may.": "05", "jun.": "06" }[rawMonth as "mar." | "abr." | "may." | "jun."] ?? "01";
     const date = year && day ? `${year}-${month}-${day.padStart(2, "0")}` : new Date().toISOString().slice(0, 10);
-    const teamNames = [...block.matchAll(/team-name-full">([^<]+)/g)].map((match) => canonicalTeamName(stripTags(match[1])));
+    const teamNames = [...block.matchAll(/team-name-full">([^<]+)/g)].map((match) => canonicalTeamName(stripTags(match[1]), config));
     const scores = [...block.matchAll(/<div class="fake-cell">([^<]*)<\/div>/g)].map((match) => stripTags(match[1]));
     const isFinal = block.includes("complete matchStatus") || block.includes("> Final <");
     return {
       gameId: `GENIUS-${matchId}`,
-      competition: COMPETITION,
+      competition: config.competition,
       phase: zone,
       week: "Oficial",
       date,
@@ -266,6 +329,22 @@ function parseSchedule(html: string, zone: string): GameRow[] {
   }).filter((game) => game.homeTeam !== "Local" && game.awayTeam !== "Visita");
 }
 
+function scheduleKey(game: GameRow) {
+  const matchId = game.gameId.match(/GENIUS-(\d+)/)?.[1];
+  return matchId ? `match-${matchId}` : `${game.date}-${slugify(game.homeTeam)}-${slugify(game.awayTeam)}`;
+}
+
+function uniqueSchedules(games: GameRow[]) {
+  const byGame = new Map<string, GameRow>();
+  games.forEach((game) => {
+    const key = scheduleKey(game);
+    if (!byGame.has(key)) {
+      byGame.set(key, game);
+    }
+  });
+  return Array.from(byGame.values());
+}
+
 function mergeRosterAndStats(roster: PlayerInfo[], stats: Map<string, PlayerInfo>) {
   const players = new Map<string, PlayerInfo>();
   roster.forEach((player) => players.set(player.personId, { ...player, ...stats.get(player.personId) }));
@@ -277,48 +356,59 @@ function mergeRosterAndStats(roster: PlayerInfo[], stats: Map<string, PlayerInfo
   return Array.from(players.values());
 }
 
-export async function POST() {
+function phasePage(path: "standings" | "schedule", phase: string) {
+  if (!phase) {
+    return `/${path}`;
+  }
+  return `/${path}?phaseName=${phase.replace(/\s+/g, "+")}`;
+}
+
+export async function POST(request: Request) {
   try {
-    const [teamsHtml, teamTotalsHtml, ...zonePages] = await Promise.all([
-      fetchEmbed("/teams"),
-      fetchEmbed("/statistics/team"),
-      ...ZONES.flatMap((zone) => [
-        fetchEmbed(`/standings?phaseName=${zone.replace(" ", "+")}`),
-        fetchEmbed(`/schedule?phaseName=${zone.replace(" ", "+")}`)
+    const body = (await request.json().catch(() => ({}))) as { competition?: CompetitionKey };
+    const config = getSyncConfig(body.competition);
+    const phases = config.phases.length > 0 ? config.phases : [""];
+    const [teamsHtml, teamTotalsHtml, ...phasePages] = await Promise.all([
+      fetchEmbed("/teams", config),
+      fetchEmbed("/statistics/team", config),
+      ...phases.flatMap((phase) => [
+        fetchEmbed(phasePage("standings", phase), config),
+        fetchEmbed(phasePage("schedule", phase), config)
       ])
     ]);
 
-    const officialTeams = parseOfficialTeams(teamsHtml);
+    const officialTeams = parseOfficialTeams(teamsHtml, config);
     const standings = new Map<string, StandingInfo>();
     const schedules: GameRow[] = [];
 
-    ZONES.forEach((zone, index) => {
-      const standingsHtml = zonePages[index * 2];
-      const scheduleHtml = zonePages[index * 2 + 1];
+    phases.forEach((phase, index) => {
+      const zone = phase || config.defaultZone;
+      const standingsHtml = phasePages[index * 2];
+      const scheduleHtml = phasePages[index * 2 + 1];
       parseStandings(standingsHtml, zone).forEach((row) => {
         if (row?.id) {
           standings.set(row.id, row.info);
         }
       });
-      schedules.push(...parseSchedule(scheduleHtml, zone));
+      schedules.push(...parseSchedule(scheduleHtml, zone, config));
     });
 
-    const teamTotals = parseTeamTotals(teamTotalsHtml);
+    const teamTotals = parseTeamTotals(teamTotalsHtml, config);
     const rosterPages = await Promise.all(
       officialTeams.flatMap((team) => [
-        fetchEmbed(`/team/${team.id}/roster`),
-        fetchEmbed(`/team/${team.id}/statistics`)
+        fetchEmbed(`/team/${team.id}/roster`, config),
+        fetchEmbed(`/team/${team.id}/statistics`, config)
       ])
     );
 
     const teams: TeamRow[] = officialTeams.map((team) => {
       const standing = standings.get(team.id);
-      const existing = seedData.teams.find((row) => row.competition === COMPETITION && areSameTeam(row.name, team.canonicalName));
+      const existing = seedData.teams.find((row) => row.competition === config.competition && areSameTeam(row.name, team.canonicalName));
       const totals = teamTotals.get(team.canonicalName);
       return {
         teamId: `GENIUS-${team.id}`,
-        competition: COMPETITION,
-        zone: standing?.zone ?? existing?.zone ?? "Liga DOS",
+        competition: config.competition,
+        zone: resolvedTeamZone(config, team.canonicalName, standing, existing),
         name: team.canonicalName,
         city: existing?.city ?? "",
         coach: existing?.coach ?? "",
@@ -337,7 +427,7 @@ export async function POST() {
       const statsHtml = rosterPages[index * 2 + 1];
       return mergeRosterAndStats(parseRoster(rosterHtml), parseTeamPlayerStats(statsHtml)).map((player) => ({
         playerId: `GENIUS-${player.personId}`,
-        competition: COMPETITION,
+        competition: config.competition,
         teamName: team.canonicalName,
         name: player.name,
         position: player.position,
@@ -364,13 +454,15 @@ export async function POST() {
     return NextResponse.json({
       teams,
       players,
-      games: schedules,
+      games: uniqueSchedules(schedules),
       syncedAt: new Date().toISOString(),
+      competition: config.competition,
+      competitionId: config.competitionId,
       sources: ["teams", "standings", "schedule", "statistics/team", "team/{id}/roster", "team/{id}/statistics"]
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "No se pudo sincronizar Liga DOS desde Genius." },
+      { error: error instanceof Error ? error.message : "No se pudo sincronizar la competencia desde Genius." },
       { status: 502 }
     );
   }

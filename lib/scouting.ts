@@ -261,8 +261,28 @@ function filterGamesByLocality(games: GameRow[], teamName: string, locality: Sco
   return games;
 }
 
+function matchKey(game: GameRow) {
+  const matchId = game.gameId.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1] ?? game.notes.match(/(?:FIBA|Genius)\s+(\d+)/)?.[1];
+  if (matchId) {
+    return `${game.competition}-match-${matchId}`;
+  }
+  return `${game.competition}-${game.date}-${game.homeTeam}-${game.awayTeam}`;
+}
+
+function uniqueGames(games: GameRow[]) {
+  const byGame = new Map<string, GameRow>();
+  games.forEach((game) => {
+    const key = matchKey(game);
+    const existing = byGame.get(key);
+    if (!existing || (game.status === "Final" && existing.status !== "Final")) {
+      byGame.set(key, game);
+    }
+  });
+  return Array.from(byGame.values());
+}
+
 function finalGamesForTeam(games: GameRow[], teamName: string, filters: ScoutingFilters) {
-  return games
+  return uniqueGames(games)
     .filter((game) => game.status === "Final" && (areSameTeam(game.homeTeam, teamName) || areSameTeam(game.awayTeam, teamName)))
     .filter((game) => filterGamesByLocality([game], teamName, filters.locality).length > 0)
     .sort((a, b) => b.date.localeCompare(a.date))
