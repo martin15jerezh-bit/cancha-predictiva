@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { areSameTeam, competitionLabels, CURRENT_COMPETITION, LIGA_DOS_COMPETITION, seedData } from "@/lib/data";
+import { areSameTeam, competitionLabels, CURRENT_COMPETITION, LIGA_DOS_COMPETITION, LNF_COMPETITION, seedData } from "@/lib/data";
 import { CompetitionKey, GameRow, PlayerRow, TeamRow } from "@/lib/types";
 
 const IURL = "https://clnb.web.geniussports.com/?p=9";
@@ -80,6 +80,20 @@ const lnbAliases: Record<string, string> = {
   "CD COLO COLO": "Colo-Colo"
 };
 
+const lnfAliases: Record<string, string> = {
+  "AZUL Y ROJO": "Azul y Rojo",
+  "CD GIMNASTICO": "Gimnastico Vina del Mar",
+  "CD SERGIO CEPPI": "Sergio Ceppi",
+  "CD UNIV. CONCEPCION": "Universidad de Concepcion",
+  "CD UNIVERSIDAD DE CONCEPCION": "Universidad de Concepcion",
+  "COLEGIO LOS LEONES": "Colegio Los Leones",
+  "MUN. PUENTE ALTO": "Municipal Puente Alto",
+  "MUNICIPAL PUENTE ALTO": "Municipal Puente Alto",
+  "SPORTIVA ITALIANA": "Sportiva Italiana",
+  "STGO. MORNING QUILICURA": "Santiago Morning Quilicura",
+  "SANTIAGO MORNING QUILICURA": "Santiago Morning Quilicura"
+};
+
 const syncConfigs: Record<string, CompetitionSyncConfig> = {
   [LIGA_DOS_COMPETITION]: {
     competition: LIGA_DOS_COMPETITION,
@@ -96,6 +110,14 @@ const syncConfigs: Record<string, CompetitionSyncConfig> = {
     defaultZone: "LNB Chile",
     phases: ["Conferencia Centro", "Conferencia Sur"],
     aliases: lnbAliases
+  },
+  [LNF_COMPETITION]: {
+    competition: LNF_COMPETITION,
+    competitionId: "48641",
+    label: "LNF Chile",
+    defaultZone: "Fase Regular",
+    phases: [""],
+    aliases: lnfAliases
   }
 };
 

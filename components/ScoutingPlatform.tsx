@@ -21,6 +21,7 @@ import {
   getPointsForPerGame,
   getReboundsPerGame,
   LIGA_DOS_COMPETITION,
+  LNF_COMPETITION,
   parseNumber,
   seedData
 } from "@/lib/data";
@@ -59,7 +60,7 @@ type TabKey = (typeof tabs)[number];
 type NoteScope = "rival" | "partido" | "jugador" | "equipo";
 type RangeKey = "Ultimos 3 partidos" | "Ultimos 5 partidos" | "Ultimos 8 disponibles";
 type LocalityKey = "Local y visita" | "Solo local" | "Solo visita";
-type ScoutingCompetitionKey = "Liga DOS 2026" | "Liga Chery Apertura 2026";
+type ScoutingCompetitionKey = "Liga DOS 2026" | "Liga Chery Apertura 2026" | "Liga Nacional Femenina 2026";
 type PrivateNote = {
   id: string;
   scope: NoteScope;
@@ -71,7 +72,8 @@ type PrivateNote = {
 
 const SCOUTING_COMPETITIONS: ScoutingCompetitionKey[] = [
   LIGA_DOS_COMPETITION as ScoutingCompetitionKey,
-  CURRENT_COMPETITION as ScoutingCompetitionKey
+  CURRENT_COMPETITION as ScoutingCompetitionKey,
+  LNF_COMPETITION as ScoutingCompetitionKey
 ];
 const competitionDisplay: Record<ScoutingCompetitionKey, { label: string; shortLabel: string; kicker: string; sourceUrl: string; placeholderId: string }> = {
   "Liga DOS 2026": {
@@ -87,6 +89,13 @@ const competitionDisplay: Record<ScoutingCompetitionKey, { label: string; shortL
     kicker: "LNB Chile · Scouting privado",
     sourceUrl: "https://clnb.web.geniussports.com/?p=9&WHurl=%2Fcompetition%2F48076%2Fstandings",
     placeholderId: "48076"
+  },
+  "Liga Nacional Femenina 2026": {
+    label: "Liga Nacional Femenina",
+    shortLabel: "LNF Chile",
+    kicker: "LNF Chile · Scouting privado",
+    sourceUrl: "https://clnb.web.geniussports.com/?p=9&WHurl=%2Fcompetition%2F48641%2Fstandings",
+    placeholderId: "48641"
   }
 };
 

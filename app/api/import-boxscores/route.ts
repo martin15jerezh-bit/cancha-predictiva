@@ -92,6 +92,20 @@ const boxscoreTeamAliases: Partial<Record<CompetitionKey, Record<string, string>
     "CDS BASQUETBOL CONSTITUCIÓN": "CDSB Constitucion",
     "THE SHARKS": "CD Sharks",
     "UDE TEMUCO": "UDE Temuco"
+  },
+  "Liga Nacional Femenina 2026": {
+    "AZUL Y ROJO": "Azul y Rojo",
+    "CD GIMNASTICO": "Gimnastico Vina del Mar",
+    "CD SERGIO CEPPI": "Sergio Ceppi",
+    "CD UNIV CONCEPCION": "Universidad de Concepcion",
+    "CD UNIV. CONCEPCION": "Universidad de Concepcion",
+    "CD UNIVERSIDAD DE CONCEPCION": "Universidad de Concepcion",
+    "COLEGIO LOS LEONES": "Colegio Los Leones",
+    "MUN. PUENTE ALTO": "Municipal Puente Alto",
+    "MUNICIPAL PUENTE ALTO": "Municipal Puente Alto",
+    "SPORTIVA ITALIANA": "Sportiva Italiana",
+    "STGO. MORNING QUILICURA": "Santiago Morning Quilicura",
+    "SANTIAGO MORNING QUILICURA": "Santiago Morning Quilicura"
   }
 };
 
