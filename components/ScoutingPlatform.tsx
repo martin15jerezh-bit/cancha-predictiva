@@ -404,6 +404,7 @@ type ShotPlayerCard = {
   player?: MatchupScout["rivalPlayers"][number];
   shots: ShotRow[];
 };
+type TacticalPlayerCard = ShotPlayerCard & { player: MatchupScout["rivalPlayers"][number] };
 
 function normalizePersonName(value: string) {
   return value
@@ -839,6 +840,260 @@ function ShotCourt({ shots }: { shots: ShotRow[] }) {
           );
         })}
       </svg>
+    </div>
+  );
+}
+
+function PlayerSummaryCard({
+  card,
+  sectionTitle,
+  onOpen
+}: {
+  card: TacticalPlayerCard;
+  sectionTitle: string;
+  onOpen: () => void;
+}) {
+  const summary = shotSummary(card.shots);
+  const analysis = buildShotAnalysis(card.name, card.shots, card.player);
+  const stats = [
+    ["MIN/PJ", card.player.minutes],
+    ["PTS/PJ", card.player.points],
+    ["REB/PJ", card.player.rebounds],
+    ["AST/PJ", card.player.assists]
+  ];
+
+  return (
+    <button className={`player-summary-card ${sectionTitle === "Amenaza principal" ? "featured" : ""}`} onClick={onOpen} type="button">
+      <header>
+        <span>{card.tag}</span>
+        <strong>{card.name}</strong>
+        <small>{card.player.role}</small>
+      </header>
+      <div className="player-summary-tags">
+        <em>{analysis.profile}</em>
+        <em>{summary.attempts > 0 ? `${summary.attempts} tiros · ${summary.efficiency}` : "sin carta confirmada"}</em>
+      </div>
+      <div className="player-summary-stats">
+        {stats.map(([label, value]) => (
+          <span key={label}>
+            <small>{label}</small>
+            <b>{value}</b>
+          </span>
+        ))}
+      </div>
+      <p>{analysis.decisions[0] ?? card.player.defensiveKey}</p>
+      <i>Ver lectura tactica</i>
+    </button>
+  );
+}
+
+function PlayerTacticalHeader({
+  card,
+  index,
+  total,
+  onClose,
+  onPrevious,
+  onNext
+}: {
+  card: TacticalPlayerCard;
+  index: number;
+  total: number;
+  onClose: () => void;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  const analysis = buildShotAnalysis(card.name, card.shots, card.player);
+  return (
+    <header className="player-sheet-header">
+      <div>
+        <p className="eyebrow">Ficha tactica individual</p>
+        <h3 id="player-sheet-title">{card.name}</h3>
+        <div className="player-sheet-tags">
+          <span>{card.role}</span>
+          <span>Prioridad {card.rank} del plan</span>
+          <span>{analysis.profile}</span>
+        </div>
+        <p>{analysis.headline}</p>
+      </div>
+      <div className="player-sheet-controls">
+        <button onClick={onPrevious} type="button" aria-label="Jugador anterior">Anterior</button>
+        <strong>{index + 1}/{total}</strong>
+        <button onClick={onNext} type="button" aria-label="Jugador siguiente">Siguiente</button>
+        <button className="sheet-close" onClick={onClose} type="button" aria-label="Cerrar ficha">x</button>
+      </div>
+    </header>
+  );
+}
+
+function PlayerShotChartSummary({ card }: { card: TacticalPlayerCard }) {
+  const summary = shotSummary(card.shots);
+  const analysis = buildShotAnalysis(card.name, card.shots, card.player);
+  return (
+    <section className="player-sheet-block shot-block">
+      <div className="player-sheet-block-heading">
+        <span>Shot chart + lectura</span>
+        <strong>{summary.attempts} tiros · {summary.efficiency}</strong>
+      </div>
+      <div className="player-shot-summary-layout">
+        <div className="shot-chart-mini">
+          <ShotCourt shots={card.shots} />
+        </div>
+        <div className="shot-readout">
+          <p>{analysis.style}</p>
+          <div>
+            <span>Zona preferida</span>
+            <strong>{summary.topZone}</strong>
+          </div>
+          <div>
+            <span>Mayor volumen</span>
+            <strong>{summary.topQuarter}</strong>
+          </div>
+          <div>
+            <span>Tendencia espacial</span>
+            <strong>{summary.topSide}</strong>
+          </div>
+          <small>{summary.avoidedZones.length > 0 ? `Evita ${summary.avoidedZones.slice(0, 2).join(" y ")}.` : "Usa varias zonas: quitar primera ventaja antes que perseguir todo."}</small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PlayerDecisionProfile({ card }: { card: TacticalPlayerCard }) {
+  const analysis = buildShotAnalysis(card.name, card.shots, card.player);
+  return (
+    <section className="player-sheet-grid">
+      <article className="player-sheet-block">
+        <div className="player-sheet-block-heading">
+          <span>Perfil de juego</span>
+          <strong>{analysis.profile}</strong>
+        </div>
+        <p>{analysis.style}</p>
+        <div className="player-profile-stats">
+          <span><small>MIN/PJ</small><b>{card.player.minutes}</b></span>
+          <span><small>PTS/PJ</small><b>{card.player.points}</b></span>
+          <span><small>REB/PJ</small><b>{card.player.rebounds}</b></span>
+          <span><small>AST/PJ</small><b>{card.player.assists}</b></span>
+        </div>
+      </article>
+      <article className="player-sheet-block">
+        <div className="player-sheet-block-heading">
+          <span>Decisiones tipicas</span>
+        </div>
+        <ul>
+          {analysis.decisions.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </article>
+    </section>
+  );
+}
+
+function PlayerStrengthsWeaknesses({ card }: { card: TacticalPlayerCard }) {
+  const analysis = buildShotAnalysis(card.name, card.shots, card.player);
+  return (
+    <section className="player-sheet-grid">
+      <article className="player-sheet-block strength">
+        <div className="player-sheet-block-heading">
+          <span>Fortalezas reales</span>
+        </div>
+        <ul>
+          {analysis.strengths.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </article>
+      <article className="player-sheet-block weakness">
+        <div className="player-sheet-block-heading">
+          <span>Debilidades explotables</span>
+        </div>
+        <ul>
+          {analysis.weaknesses.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </article>
+    </section>
+  );
+}
+
+function PlayerDefensivePlan({ card }: { card: TacticalPlayerCard }) {
+  const analysis = buildShotAnalysis(card.name, card.shots, card.player);
+  return (
+    <article className="player-sheet-block plan defense">
+      <div className="player-sheet-block-heading">
+        <span>Plan defensivo</span>
+        <strong>Regla de staff</strong>
+      </div>
+      <ul>
+        {analysis.defensiveInstructions.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </article>
+  );
+}
+
+function PlayerAttackPlan({ card }: { card: TacticalPlayerCard }) {
+  const analysis = buildShotAnalysis(card.name, card.shots, card.player);
+  return (
+    <article className="player-sheet-block plan attack">
+      <div className="player-sheet-block-heading">
+        <span>Como atacarlo</span>
+        <strong>Uso ofensivo propio</strong>
+      </div>
+      <ul>
+        {analysis.attackInstructions.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </article>
+  );
+}
+
+function PlayerTacticalSheet({
+  card,
+  players,
+  onClose,
+  onSelect,
+  onOpenFull
+}: {
+  card: TacticalPlayerCard;
+  players: TacticalPlayerCard[];
+  onClose: () => void;
+  onSelect: (name: string) => void;
+  onOpenFull: () => void;
+}) {
+  const index = Math.max(0, players.findIndex((player) => sameShotPlayer(player.name, card.name)));
+  const previous = players[(index - 1 + players.length) % players.length] ?? card;
+  const next = players[(index + 1) % players.length] ?? card;
+
+  return (
+    <div className="player-sheet-layer" role="presentation">
+      <button className="player-sheet-backdrop" onClick={onClose} type="button" aria-label="Cerrar ficha tactica" />
+      <aside aria-modal="true" className="player-sheet" role="dialog" aria-labelledby="player-sheet-title">
+        <PlayerTacticalHeader
+          card={card}
+          index={index}
+          total={players.length}
+          onClose={onClose}
+          onPrevious={() => onSelect(previous.name)}
+          onNext={() => onSelect(next.name)}
+        />
+        <div className="player-sheet-body">
+          <PlayerShotChartSummary card={card} />
+          <PlayerDecisionProfile card={card} />
+          <PlayerStrengthsWeaknesses card={card} />
+          <section className="player-sheet-grid">
+            <PlayerDefensivePlan card={card} />
+            <PlayerAttackPlan card={card} />
+          </section>
+          <button className="primary-button player-full-button" onClick={onOpenFull} type="button">
+            Ver analisis completo
+          </button>
+        </div>
+      </aside>
     </div>
   );
 }
@@ -2022,6 +2277,7 @@ export function ScoutingPlatform() {
   const [range, setRange] = useState<RangeKey>("Ultimos 5 partidos");
   const [locality, setLocality] = useState<LocalityKey>("Local y visita");
   const [selectedShotPlayer, setSelectedShotPlayer] = useState("");
+  const [selectedTacticalPlayer, setSelectedTacticalPlayer] = useState("");
   const [shotPeriod, setShotPeriod] = useState<ShotPeriodFilter>("Todo");
   const [shotGameFilter, setShotGameFilter] = useState<ShotGameFilter>("Todos");
   const [urls, setUrls] = useState("");
@@ -2103,12 +2359,34 @@ export function ScoutingPlatform() {
 
   useEffect(() => {
     setSelectedShotPlayer("");
+    setSelectedTacticalPlayer("");
     setShotGameFilter("Todos");
     setUrls("");
     setOfficialSyncStatus(`Base oficial ${competitionCopy(activeCompetition).shortLabel} lista para sincronizar standings, equipos, rosters y fixture.`);
     setIngestStatus(`Listo para pegar links FEBACHILE / Genius Sports de ${competitionCopy(activeCompetition).shortLabel}.`);
     setShotImportStatus(`Carta de tiro lista para generar desde los partidos oficiales del rival en ${competitionCopy(activeCompetition).shortLabel}.`);
   }, [activeCompetition]);
+
+  useEffect(() => {
+    if (!selectedTacticalPlayer) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedTacticalPlayer("");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedTacticalPlayer]);
+
+  useEffect(() => {
+    if (tab !== "Jugadores") {
+      setSelectedTacticalPlayer("");
+    }
+  }, [tab]);
 
   const handleImport = async () => {
     const parsedUrls = urls
@@ -2538,10 +2816,15 @@ export function ScoutingPlatform() {
   const activeTrendLabel = trendState(activePointsDelta, 3);
   const playerScoutingSections = shotPlayerSections.map((section) => ({
     ...section,
-    players: section.cards
-      .map((card) => model.rivalPlayers.find((player) => sameShotPlayer(player.name, card.name)))
-      .filter((player): player is MatchupScout["rivalPlayers"][number] => Boolean(player))
-  })).filter((section) => section.players.length > 0);
+    cards: section.cards
+      .map((card) => {
+        const player = card.player ?? model.rivalPlayers.find((item) => sameShotPlayer(item.name, card.name));
+        return player ? { ...card, player } : null;
+      })
+      .filter((card): card is TacticalPlayerCard => Boolean(card))
+  })).filter((section) => section.cards.length > 0);
+  const tacticalPlayerCards = playerScoutingSections.flatMap((section) => section.cards);
+  const selectedTacticalCard = tacticalPlayerCards.find((card) => sameShotPlayer(card.name, selectedTacticalPlayer));
   const ownRecentComparison = recentTeamMetrics(model.ownTeam);
   const rivalRecentComparison = recentTeamMetrics(model.rivalTeam);
   const ownSeasonComparison = seasonTeamMetrics(model.ownTeam.team);
@@ -2907,89 +3190,100 @@ export function ScoutingPlatform() {
       ) : null}
 
       {tab === "Jugadores" ? (
-        <section className="module-panel">
-          <div className="module-heading">
-            <p className="eyebrow">Scouting individual</p>
-            <h3>Jugadores de impacto rival</h3>
-          </div>
-          <div className="player-scout-sections">
-            {playerScoutingSections.map((section) => (
-              <section className="player-scout-section" key={section.title}>
-                <div className="player-section-heading">
-                  <span>{section.title}</span>
-                  <small>{section.caption}</small>
-                </div>
-                <div className="player-scout-card-grid">
-                  {section.players.map((player) => (
-                    <article className={section.title === "Amenaza principal" ? "player-scout-card featured" : "player-scout-card"} key={player.name}>
-                      <header>
-                        <strong>{player.name}</strong>
-                        <span>{player.role}</span>
-                      </header>
-                      <p>{player.defensiveKey}</p>
-                      <div>
-                        <small>MIN/PJ <b>{player.minutes}</b></small>
-                        <small>PTS/PJ <b>{player.points}</b></small>
-                        <small>REB/PJ <b>{player.rebounds}</b></small>
-                        <small>AST/PJ <b>{player.assists}</b></small>
-                      </div>
-                      <em>{player.playerType} · {player.trend}</em>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-          <details className="player-detail-table">
-            <summary>Detalle tecnico completo</summary>
-            <div className="table-shell premium-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Jugador</th>
-                  <th>Rol estimado</th>
-                  <th>Tipo</th>
-                  <th>Fortaleza</th>
-                  <th>Debilidad</th>
-                  <th>Clave defensiva</th>
-                  <th>PJ</th>
-                  <th>MIN/PJ</th>
-                  <th>PTS/PJ</th>
-                  <th>REB/PJ</th>
-                  <th>AST/PJ</th>
-                  <th>AST/PER</th>
-                  <th>EF Tiro</th>
-                  <th>PPM</th>
-                  <th>Impacto/PJ</th>
-                  <th>Confiabilidad</th>
-                </tr>
-              </thead>
-              <tbody>
-                {playerRows.map((player) => (
-                  <tr key={player.name}>
-                    <td>{player.name}</td>
-                    <td>{player.role}</td>
-                    <td>{player.playerType}</td>
-                    <td>{player.strength}</td>
-                    <td>{player.weakness}</td>
-                    <td>{player.defensiveKey}</td>
-                    <td>{player.games}</td>
-                    <td>{player.minutes}</td>
-                    <td>{player.points}</td>
-                    <td>{player.rebounds}</td>
-                    <td>{player.assists}</td>
-                    <td>{player.assistTurnoverRatio ?? "s/d"}</td>
-                    <td>{player.shootingEfficiency ?? "s/d"}</td>
-                    <td>{player.pointsPerMinute}</td>
-                    <td>{player.recentImpactIndex}</td>
-                    <td><EvidencePill evidence={player.evidence} confidence={0.68} /></td>
+        <>
+          <section className="module-panel player-hub-panel">
+            <div className="module-heading player-hub-heading">
+              <div>
+                <p className="eyebrow">Scouting individual</p>
+                <h3>Jugadores de impacto rival</h3>
+                <p className="heading-copy">Lectura rapida en cards. El detalle tactico vive en la ficha lateral para preparar matchups sin ruido.</p>
+              </div>
+              <span>{tacticalPlayerCards.length} jugadores priorizados</span>
+            </div>
+            <div className="player-scout-sections">
+              {playerScoutingSections.map((section) => (
+                <section className="player-scout-section" key={section.title}>
+                  <div className="player-section-heading">
+                    <span>{section.title}</span>
+                    <small>{section.caption}</small>
+                  </div>
+                  <div className="player-scout-card-grid">
+                    {section.cards.map((card) => (
+                      <PlayerSummaryCard
+                        card={card}
+                        key={card.name}
+                        onOpen={() => setSelectedTacticalPlayer(card.name)}
+                        sectionTitle={section.title}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+            <details className="player-detail-table">
+              <summary>Detalle tecnico completo</summary>
+              <div className="table-shell premium-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Jugador</th>
+                    <th>Rol estimado</th>
+                    <th>Tipo</th>
+                    <th>Fortaleza</th>
+                    <th>Debilidad</th>
+                    <th>Clave defensiva</th>
+                    <th>PJ</th>
+                    <th>MIN/PJ</th>
+                    <th>PTS/PJ</th>
+                    <th>REB/PJ</th>
+                    <th>AST/PJ</th>
+                    <th>AST/PER</th>
+                    <th>EF Tiro</th>
+                    <th>PPM</th>
+                    <th>Impacto/PJ</th>
+                    <th>Confiabilidad</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          </details>
-        </section>
+                </thead>
+                <tbody>
+                  {playerRows.map((player) => (
+                    <tr key={player.name}>
+                      <td>{player.name}</td>
+                      <td>{player.role}</td>
+                      <td>{player.playerType}</td>
+                      <td>{player.strength}</td>
+                      <td>{player.weakness}</td>
+                      <td>{player.defensiveKey}</td>
+                      <td>{player.games}</td>
+                      <td>{player.minutes}</td>
+                      <td>{player.points}</td>
+                      <td>{player.rebounds}</td>
+                      <td>{player.assists}</td>
+                      <td>{player.assistTurnoverRatio ?? "s/d"}</td>
+                      <td>{player.shootingEfficiency ?? "s/d"}</td>
+                      <td>{player.pointsPerMinute}</td>
+                      <td>{player.recentImpactIndex}</td>
+                      <td><EvidencePill evidence={player.evidence} confidence={0.68} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            </details>
+          </section>
+          {selectedTacticalCard ? (
+            <PlayerTacticalSheet
+              card={selectedTacticalCard}
+              players={tacticalPlayerCards}
+              onClose={() => setSelectedTacticalPlayer("")}
+              onSelect={setSelectedTacticalPlayer}
+              onOpenFull={() => {
+                setSelectedShotPlayer(selectedTacticalCard.name);
+                setTab("Carta de tiro");
+                setSelectedTacticalPlayer("");
+              }}
+            />
+          ) : null}
+        </>
       ) : null}
 
       {tab === "Rotacion" ? (
