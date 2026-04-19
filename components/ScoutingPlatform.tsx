@@ -585,6 +585,26 @@ function shotSummary(shots: ShotRow[]) {
   const topZone = [...zones.entries()].sort((a, b) => b[1] - a[1])[0];
   const topSide = [...sides.entries()].sort((a, b) => b[1] - a[1])[0];
   const topQuarter = [...quarters.entries()].sort((a, b) => b[1] - a[1])[0];
+  const zoneBreakdown = ["pintura", "media distancia", "triple frontal/45", "esquina", "costado izquierdo", "costado derecho"]
+    .map((zone) => {
+      const zoneShots = shots.filter((shot) => shotZone(shot) === zone);
+      const zoneMade = zoneShots.filter((shot) => shot.made).length;
+      return {
+        zone,
+        attempts: zoneShots.length,
+        made: zoneMade,
+        efficiency: zoneShots.length === 0 ? 0 : zoneMade / zoneShots.length
+      };
+    });
+  const avoidedZones = zoneBreakdown
+    .filter((zone) => zone.attempts === 0)
+    .map((zone) => zone.zone);
+  const mostEfficientZone = [...zoneBreakdown]
+    .filter((zone) => zone.attempts >= Math.max(2, Math.round(attempts * 0.12)))
+    .sort((zoneA, zoneB) => zoneB.efficiency - zoneA.efficiency)[0];
+  const leastEfficientZone = [...zoneBreakdown]
+    .filter((zone) => zone.attempts >= Math.max(2, Math.round(attempts * 0.12)))
+    .sort((zoneA, zoneB) => zoneA.efficiency - zoneB.efficiency)[0];
 
   return {
     attempts,
@@ -598,11 +618,15 @@ function shotSummary(shots: ShotRow[]) {
     topZoneCount: topZone?.[1] ?? 0,
     topSide: topSide?.[0] ?? "sin lado dominante",
     topQuarter: topQuarter?.[0] ? `${topQuarter[0]}C` : "s/d",
-    topQuarterAttempts: topQuarter?.[1] ?? 0
+    topQuarterAttempts: topQuarter?.[1] ?? 0,
+    zoneBreakdown,
+    avoidedZones,
+    mostEfficientZone,
+    leastEfficientZone
   };
 }
 
-function buildShotAnalysis(playerName: string, shots: ShotRow[]) {
+function buildShotAnalysis(playerName: string, shots: ShotRow[], player?: MatchupScout["rivalPlayers"][number]) {
   const summary = shotSummary(shots);
   if (summary.attempts === 0) {
     return {
@@ -611,6 +635,13 @@ function buildShotAnalysis(playerName: string, shots: ShotRow[]) {
         "Reimporta el link de Estadisticas completas para capturar la pestana Carta de tiro.",
         "Cuando existan coordenadas, el sistema mostrara zonas, cuartos y plan defensivo."
       ],
+      profile: player?.playerType ?? "Perfil pendiente",
+      style: "Lectura pendiente de coordenadas.",
+      decisions: ["Usar estadistica tradicional y video hasta tener carta confirmada."],
+      strengths: [player?.strength ?? "Sin fortaleza espacial confirmada."],
+      weaknesses: [player?.weakness ?? "Sin debilidad espacial confirmada."],
+      defensiveInstructions: ["Defender segun rol, negar ritmo temprano y validar con video."],
+      attackInstructions: ["Atacarlo segun matchup fisico mientras se confirma tendencia."],
       plan: "Plan provisorio: defender segun scouting estadistico y validar con video."
     };
   }
@@ -621,26 +652,108 @@ function buildShotAnalysis(playerName: string, shots: ShotRow[]) {
       : summary.firstHalfAttempts > summary.secondHalfAttempts
         ? "carga mas tiros en primera mitad"
         : "reparte volumen entre mitades";
-  const plan =
+  const threeRate = summary.threeAttempts / Math.max(summary.attempts, 1);
+  const paintRate = summary.zoneBreakdown.find((zone) => zone.zone === "pintura")?.attempts ?? 0;
+  const midRate = summary.zoneBreakdown.find((zone) => zone.zone === "media distancia")?.attempts ?? 0;
+  const cornerAttempts = summary.zoneBreakdown.find((zone) => zone.zone === "esquina")?.attempts ?? 0;
+  const topZoneEfficiency = summary.zoneBreakdown.find((zone) => zone.zone === summary.topZone)?.efficiency ?? 0;
+  const profile =
+    threeRate >= 0.55 && cornerAttempts <= Math.max(1, summary.attempts * 0.12)
+      ? "Tirador de volumen frontal / creador de triple"
+      : threeRate >= 0.5
+        ? "Tirador spot-up de alto volumen"
+        : paintRate >= summary.attempts * 0.45
+          ? "Slasher / finalizador de pintura"
+          : midRate >= summary.attempts * 0.32
+            ? "Scorer de media distancia"
+            : player?.playerType ?? "Rol mixto";
+  const style =
+    topZoneEfficiency >= 0.55 && summary.topZoneCount >= summary.attempts * 0.35
+      ? `agresivo cuando toca ${summary.topZone}; castiga si llega comodo a su zona`
+      : topZoneEfficiency < 0.42 && summary.topZoneCount >= summary.attempts * 0.35
+        ? `volumen por sobre eficiencia; acepta tiros discutibles en ${summary.topZone}`
+        : `lectura mixta; busca ${summary.topZone}, pero no depende de una sola zona`;
+  const decisions = [
+    summary.topZone === "pintura"
+      ? "Primera lectura: poner presion al aro. Si gana hombro, termina o fuerza ayuda."
+      : summary.topZone === "triple frontal/45"
+        ? "Primera lectura: levantarse en 45/frontal si el defensor pasa por abajo o llega tarde."
+        : summary.topZone === "esquina"
+          ? "Primera lectura: esperar descarga. Castiga rotacion larga y cierre sin balance."
+          : "Primera lectura: buscar tiro de ritmo en zona media antes de llegar a la pintura.",
+    pressure === "aumenta volumen en segunda mitad"
+      ? "Sube decisiones de tiro despues del descanso. No dejarlo entrar limpio al 3C."
+      : pressure === "carga mas tiros en primera mitad"
+        ? "Intenta marcar tono temprano. Primeras dos defensas tienen que ser fisicas."
+        : "No concentra todo en un tramo: hay que sostener regla defensiva todo el partido.",
+    summary.avoidedZones.length > 0
+      ? `Evita ${summary.avoidedZones.slice(0, 2).join(" y ")}. Podemos vivir con que decida desde ahi.`
+      : `Usa varias zonas. La prioridad es quitar ${summary.topZone}, no perseguir todo.`
+  ];
+  const strengths = [
+    topZoneEfficiency >= 0.5
+      ? `castiga ${summary.topZone} con ${Math.round(topZoneEfficiency * 100)}% si recibe con ventaja`
+      : `toma volumen en ${summary.topZone}; aunque no sea elite, le da ritmo al equipo`,
     summary.threeAttempts >= summary.attempts * 0.45
-      ? "Pasar por arriba en bloqueos, negar catch and shoot y cerrar con mano alta."
-      : summary.topZone === "pintura"
-        ? "Cerrar primera linea, cargar ayuda corta y obligarlo a finalizar lejos del aro."
-        : "Orientarlo fuera de su zona dominante y conceder tiros de menor eficiencia.";
+      ? `amenaza exterior real: ${summary.threeMade}/${summary.threeAttempts} en triples`
+      : `amenaza cercana/media: obliga a proteger la primera linea`,
+    summary.topQuarter !== "s/d"
+      ? `mayor volumen en ${summary.topQuarter}; preparar ajuste antes de ese tramo`
+      : "volumen todavia bajo para fijar cuarto de carga"
+  ];
+  const weaknesses = [
+    summary.leastEfficientZone
+      ? `baja eficiencia en ${summary.leastEfficientZone.zone}: ${Math.round(summary.leastEfficientZone.efficiency * 100)}%`
+      : `poca muestra en zonas secundarias: sacarlo de ${summary.topZone}`,
+    summary.avoidedZones.length > 0
+      ? `evita ${summary.avoidedZones.slice(0, 2).join(" y ")}; orientar la defensa hacia esa lectura`
+      : "si no le quitamos la primera ventaja, puede elegir demasiado",
+    threeRate >= 0.45 && paintRate <= summary.attempts * 0.18
+      ? "no vive del contacto: subir fisico y obligarlo a terminar adentro"
+      : "si llega a su zona fuerte, el problema no es el tiro: es la ventaja previa"
+  ];
+  const defensiveInstructions = [
+    summary.topZone === "triple frontal/45"
+      ? "Pasar por arriba en bloqueos. No conceder pull-up frontal ni 45 comodo."
+      : summary.topZone === "esquina"
+        ? "No hundir desde su esquina. Cierre corto, mano alta y sin salto largo."
+        : summary.topZone === "pintura"
+          ? "Cerrar primera linea. Ayuda corta lista y cuerpo antes del aro."
+          : "Orientarlo fuera de su zona de ritmo. Contestar sin falta.",
+    summary.avoidedZones.length > 0
+      ? `Forzarlo hacia ${summary.avoidedZones[0]}. Vivir con ese tiro hasta que lo meta dos veces.`
+      : `Quitar ${summary.topZone}. El resto se ajusta con comunicacion.`,
+    player && player.assists >= 4
+      ? "Si atrae ayuda, rotacion temprana al pase. No regalar esquina por mirar la pelota."
+      : "Si fuerza tiro contestado, no ayudar de mas. Terminar con bloqueo de rebote."
+  ];
+  const attackInstructions = [
+    player && player.minutes >= 28 ? "Atacarlo para cargarlo de faltas: juega muchos minutos." : "Probarlo en defensa con acciones consecutivas.",
+    player && player.rebounds < 4 ? "Cargar su espalda en rebote ofensivo." : "Sacarlo lejos del aro para reducir impacto en tablero."
+  ];
+  const plan = defensiveInstructions.join(" ");
 
   return {
-    headline: `${playerName} concentra ${summary.topZoneCount}/${summary.attempts} tiros en ${summary.topZone} y ${pressure}.`,
+    headline: `${playerName}: ${profile.toLowerCase()}. ${summary.topZoneCount}/${summary.attempts} tiros en ${summary.topZone}; ${pressure}.`,
     bullets: [
       `Volumen: ${summary.attempts} tiros en la muestra, ${summary.efficiency} de acierto.`,
       `Mayor carga por cuarto: ${summary.topQuarter} con ${summary.topQuarterAttempts} tiros.`,
-      `Tendencia espacial: ${summary.topSide}; triples ${summary.threeMade}/${summary.threeAttempts}.`
+      `Tendencia espacial: ${summary.topSide}; triples ${summary.threeMade}/${summary.threeAttempts}.`,
+      `Lectura: ${style}.`
     ],
+    profile,
+    style,
+    decisions,
+    strengths,
+    weaknesses,
+    defensiveInstructions,
+    attackInstructions,
     plan
   };
 }
 
-function shotPlanText(playerName: string, shots: ShotRow[]) {
-  const analysis = buildShotAnalysis(playerName, shots);
+function shotPlanText(playerName: string, shots: ShotRow[], player?: MatchupScout["rivalPlayers"][number]) {
+  const analysis = buildShotAnalysis(playerName, shots, player);
   const summary = shotSummary(shots);
   return [
     `Carta de tiro - ${playerName}`,
@@ -649,16 +762,56 @@ function shotPlanText(playerName: string, shots: ShotRow[]) {
     `Acierto: ${summary.efficiency}`,
     `Zona dominante: ${summary.topZone}`,
     `Cuarto de mayor volumen: ${summary.topQuarter}`,
+    `Perfil: ${analysis.profile}`,
     "",
     "Lectura staff",
     analysis.headline,
     ...analysis.bullets.map((item) => `- ${item}`),
     "",
+    "Decisiones tipicas",
+    ...analysis.decisions.map((item) => `- ${item}`),
+    "",
+    "Fortalezas reales",
+    ...analysis.strengths.map((item) => `- ${item}`),
+    "",
+    "Debilidades explotables",
+    ...analysis.weaknesses.map((item) => `- ${item}`),
+    "",
     "Plan defensivo",
-    `- ${analysis.plan}`,
+    ...analysis.defensiveInstructions.map((item) => `- ${item}`),
+    "",
+    "Como atacarlo",
+    ...analysis.attackInstructions.map((item) => `- ${item}`),
     "- Comunicar la regla en una frase simple al jugador asignado.",
     "- Validar con video si el rival cambia volumen entre primera y segunda mitad."
   ].join("\n");
+}
+
+function buildShotReportSection(model: MatchupScout, shots: ShotRow[]) {
+  const playerBlocks = model.rivalPlayers.slice(0, 6).map((player, index) => {
+    const playerShots = shots.filter((shot) => sameShotPlayer(shot.playerName, player.name));
+    const analysis = buildShotAnalysis(player.name, playerShots, player);
+    return [
+      `${index + 1}. ${player.name}`,
+      `- Perfil: ${analysis.profile}.`,
+      `- Lectura: ${analysis.headline}`,
+      `- Decision tipica: ${analysis.decisions[0]}`,
+      `- Fortaleza real: ${analysis.strengths[0]}`,
+      `- Debilidad explotable: ${analysis.weaknesses[0]}`,
+      `- Regla defensiva: ${analysis.defensiveInstructions[0]}`
+    ].join("\n");
+  });
+
+  return [
+    "",
+    "## LECTURA DE JUGADORES DESDE CARTA DE TIRO",
+    shots.length > 0
+      ? `Base confirmada: ${shots.length} tiros importados desde Carta de tiro Genius/FIBA.`
+      : "Base pendiente: no hay coordenadas confirmadas en esta muestra. Importar Estadisticas completas antes de cerrar el plan.",
+    "La lectura separa dato confirmado, inferencia y decision tactica. Usar como guia de staff y validar con video.",
+    "",
+    ...playerBlocks
+  ].join("\n\n");
 }
 
 function ShotCourt({ shots }: { shots: ShotRow[] }) {
@@ -1551,6 +1704,7 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
   const ownSix = model.ownPlayers.slice(0, 6);
   const sourceCount = Math.max(model.sourceTrace.length, model.ownTeam.recentGames.length + model.rivalTeam.recentGames.length);
   const shotPct = shotFocus.length > 0 ? Math.round((shotFocusMade / shotFocus.length) * 100) : 0;
+  const shotRead = buildShotAnalysis(topThreat?.name ?? "Jugador rival", shotFocus, topThreat);
   const pages: string[] = [];
 
   const cover: string[] = [];
@@ -1642,7 +1796,7 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
   pages.push(players.join("\n"));
 
   const shotPage: string[] = [];
-  addHeader(shotPage, "Carta de tiro y zonas", "Solo se muestra como dato confirmado si existen tiros importados desde Estadisticas completas", "06 / 07", primary);
+  addHeader(shotPage, "Lectura de jugadores desde carta de tiro", "Mapa + interpretacion: que busca, que evita y como defenderlo", "06 / 07", primary);
   addRect(shotPage, 42, 72, 520, 322, [1, 1, 1], [0.86, 0.88, 0.86]);
   addSectionKicker(shotPage, "Mapa rival", 66, 364, primary);
   if (shots.length > 0) {
@@ -1653,9 +1807,14 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
     addRect(shotPage, 78, 112, 448, 214, [0.96, 0.98, 0.97], [0.78, 0.82, 0.79]);
     addWrappedText(shotPage, "Carta de tiro pendiente. Reimporta los links de Estadisticas completas para persistir coordenadas y zonas de lanzamiento.", 110, 230, 380, 17, [0.36, 0.42, 0.39], "F2", 20, 4);
   }
-  addMetricCard(shotPage, "Jugador foco", topThreat?.name ?? "s/d", topThreat ? `${formatPdfNumber(topThreat.points)} PTS/PJ · ${formatPdfNumber(topThreat.minutes)} MIN/PJ` : "Sin muestra", 594, 394, 300, 96, red);
-  addMetricCard(shotPage, "Tiros muestra", String(shotFocus.length), shots.length > 0 ? `${shotFocusMade}/${shotFocus.length} convertidos (${shotPct}%) en el foco visual` : "Sin coordenadas confirmadas", 594, 270, 300, 96, primary);
-  addMetricCard(shotPage, "Plan", "Contestar y comunicar", topThreat ? topThreat.defensiveKey : "Validar con video antes de cerrar plan", 594, 146, 300, 96, amber);
+  addMetricCard(shotPage, "Jugador foco", topThreat?.name ?? "s/d", topThreat ? `${formatPdfNumber(topThreat.points)} PTS/PJ · ${formatPdfNumber(topThreat.minutes)} MIN/PJ` : "Sin muestra", 594, 394, 300, 82, red);
+  addMetricCard(shotPage, "Perfil", shotRead.profile, shotRead.headline, 594, 294, 300, 82, primary);
+  addMetricCard(shotPage, "Tiros muestra", String(shotFocus.length), shots.length > 0 ? `${shotFocusMade}/${shotFocus.length} convertidos (${shotPct}%) en el foco visual` : "Sin coordenadas confirmadas", 594, 194, 300, 82, amber);
+  addRect(shotPage, 594, 72, 300, 92, [1, 0.96, 0.9], [0.92, 0.82, 0.62]);
+  addText(shotPage, "REGLAS DEFENSIVAS", 612, 136, 8.5, [0.5, 0.32, 0.02], "F2");
+  addWrappedText(shotPage, shotRead.defensiveInstructions.slice(0, 2).join(" "), 612, 116, 248, 8.8, [0.22, 0.28, 0.25], "F1", 11, 3);
+  addText(shotPage, "Debilidad", 612, 86, 8.5, red, "F2");
+  addWrappedText(shotPage, shotRead.weaknesses[0] ?? "Sacar de su zona fuerte y validar con video.", 684, 86, 190, 8.8, [0.22, 0.28, 0.25], "F1", 11, 2);
   addFooter(shotPage, "06 / 15", model, primary);
   pages.push(shotPage.join("\n"));
 
@@ -2342,7 +2501,7 @@ export function ScoutingPlatform() {
       : activeGamePlayerShots.filter((shot) => shot.period === Number(shotPeriod));
   const activeShotSummary = shotSummary(activeGamePlayerShots);
   const filteredShotSummary = shotSummary(filteredShotChart);
-  const activeShotAnalysis = buildShotAnalysis(activeShotPlayer?.name ?? "Jugador rival", activeGamePlayerShots);
+  const activeShotAnalysis = buildShotAnalysis(activeShotPlayer?.name ?? "Jugador rival", activeGamePlayerShots, activeShotPlayer?.player);
   const activePlayerStats = filterStatsByGame(
     rivalPlayerGameStats.filter((stat) => activeShotPlayer?.name && sameShotPlayer(activeShotPlayer.name, stat.name))
   );
@@ -2909,12 +3068,12 @@ export function ScoutingPlatform() {
                     {isShotImporting ? "Generando..." : "Generar carta de tiro"}
                   </button>
                 ) : null}
-                <button
-                  className="primary-button"
-                  disabled={!activeShotPlayer || activeGamePlayerShots.length === 0}
-                  onClick={() => downloadPdf(`plan-defensivo-${activeShotPlayer?.name ?? "jugador"}.pdf`, shotPlanText(activeShotPlayer?.name ?? "Jugador rival", activeGamePlayerShots))}
-                  type="button"
-                >
+                  <button
+                    className="primary-button"
+                    disabled={!activeShotPlayer || activeGamePlayerShots.length === 0}
+                    onClick={() => downloadPdf(`plan-defensivo-${activeShotPlayer?.name ?? "jugador"}.pdf`, shotPlanText(activeShotPlayer?.name ?? "Jugador rival", activeGamePlayerShots, activeShotPlayer?.player))}
+                    type="button"
+                  >
                   Descargar plan
                 </button>
               </div>
@@ -3003,7 +3162,86 @@ export function ScoutingPlatform() {
                 <span><i className="legend-miss" /> Fallado</span>
                 <strong>{filteredShotSummary.attempts} tiros visibles · {filteredShotSummary.efficiency}</strong>
               </div>
-              <div className="shot-trend-card">
+              <section className="shot-tactical-board" aria-label="Lectura tactica desde carta de tiro">
+                <article className="shot-tactical-column profile">
+                  <span>Perfil de juego</span>
+                  <strong>{activeShotAnalysis.profile}</strong>
+                  <p>{activeShotAnalysis.style}</p>
+                  {activeShotAnalysis.bullets.slice(0, 3).map((item) => (
+                    <small key={item}>{item}</small>
+                  ))}
+                </article>
+                <article className="shot-tactical-column">
+                  <span>Decisiones tipicas</span>
+                  {activeShotAnalysis.decisions.map((item) => (
+                    <p key={item}>{item}</p>
+                  ))}
+                </article>
+                <article className="shot-tactical-column strength">
+                  <span>Fortalezas reales</span>
+                  {activeShotAnalysis.strengths.slice(0, 3).map((item) => (
+                    <p key={item}>{item}</p>
+                  ))}
+                </article>
+                <article className="shot-tactical-column weakness">
+                  <span>Debilidades explotables</span>
+                  {activeShotAnalysis.weaknesses.slice(0, 3).map((item) => (
+                    <p key={item}>{item}</p>
+                  ))}
+                </article>
+                <article className="shot-tactical-column defense">
+                  <span>Plan defensivo</span>
+                  {activeShotAnalysis.defensiveInstructions.map((item) => (
+                    <p key={item}>{item}</p>
+                  ))}
+                </article>
+                <article className="shot-tactical-column attack">
+                  <span>Como atacarlo</span>
+                  {activeShotAnalysis.attackInstructions.map((item) => (
+                    <p key={item}>{item}</p>
+                  ))}
+                </article>
+              </section>
+              {activeGamePlayerShots.length === 0 ? (
+                <div className="shot-empty-state">
+                  <strong>Sin coordenadas para este jugador.</strong>
+                  <p>{shotEmptyCopy}</p>
+                </div>
+              ) : null}
+            </section>
+
+            <aside className="module-panel shot-analysis-panel">
+              <div className="module-heading">
+                <p className="eyebrow">Lectura tactica</p>
+                <h3>Lectura rapida</h3>
+              </div>
+              <div className="half-split">
+                <article>
+                  <span>1er tiempo</span>
+                  <strong>{activeShotSummary.firstHalfAttempts}</strong>
+                  <small>tiros</small>
+                </article>
+                <article>
+                  <span>2do tiempo</span>
+                  <strong>{activeShotSummary.secondHalfAttempts}</strong>
+                  <small>tiros</small>
+                </article>
+              </div>
+              <div className="shot-analysis-list">
+                <h4>Lectura central</h4>
+                {activeShotAnalysis.bullets.slice(0, 3).map((item) => (
+                  <p key={item}>{item}</p>
+                ))}
+              </div>
+              <div className="defense-plan">
+                <span>Regla principal</span>
+                <p>{activeShotAnalysis.defensiveInstructions[0] ?? `Negar zona dominante, contestar sin falta y comunicar si sube volumen en ${activeShotSummary.topQuarter}.`}</p>
+              </div>
+              <div className="player-mode-shot">
+                <span>Modo jugador</span>
+                <p>{activeShotAnalysis.defensiveInstructions[0] ?? `Negar zona dominante, contestar sin falta y comunicar si sube volumen en ${activeShotSummary.topQuarter}.`}</p>
+              </div>
+              <div className="shot-trend-card side-trend">
                 <header>
                   <span>Tendencia vs base</span>
                   <strong>{activeTrendLabel}</strong>
@@ -3027,44 +3265,6 @@ export function ScoutingPlatform() {
                       ? "Produccion reciente bajo su base: mantener scouting, pero no sobrerreaccionar si baja volumen."
                       : "La muestra reciente confirma su base: plan confiable para preparar matchup."}
                 </p>
-              </div>
-              {activeGamePlayerShots.length === 0 ? (
-                <div className="shot-empty-state">
-                  <strong>Sin coordenadas para este jugador.</strong>
-                  <p>{shotEmptyCopy}</p>
-                </div>
-              ) : null}
-            </section>
-
-            <aside className="module-panel shot-analysis-panel">
-              <div className="module-heading">
-                <p className="eyebrow">Lectura tactica</p>
-                <h3>Donde castiga</h3>
-              </div>
-              <div className="shot-analysis-list">
-                {activeShotAnalysis.bullets.map((item) => (
-                  <p key={item}>{item}</p>
-                ))}
-              </div>
-              <div className="half-split">
-                <article>
-                  <span>1er tiempo</span>
-                  <strong>{activeShotSummary.firstHalfAttempts}</strong>
-                  <small>tiros</small>
-                </article>
-                <article>
-                  <span>2do tiempo</span>
-                  <strong>{activeShotSummary.secondHalfAttempts}</strong>
-                  <small>tiros</small>
-                </article>
-              </div>
-              <div className="defense-plan">
-                <span>Plan defensivo</span>
-                <p>{activeShotAnalysis.plan}</p>
-              </div>
-              <div className="player-mode-shot">
-                <span>Modo jugador</span>
-                <p>Negar zona dominante, contestar sin falta y comunicar si sube volumen en {activeShotSummary.topQuarter}.</p>
               </div>
             </aside>
           </section>
@@ -3341,7 +3541,7 @@ export function ScoutingPlatform() {
                     downloadPdfDocument(report.filename, buildTacticalDossierPdf(model, rivalShots));
                     return;
                   }
-                  downloadPdf(report.filename, buildEditableReport(model, report.kind));
+                  downloadPdf(report.filename, `${buildEditableReport(model, report.kind)}\n${buildShotReportSection(model, rivalShots)}`);
                 }}
                 type="button"
               >
@@ -3367,7 +3567,7 @@ export function ScoutingPlatform() {
               </article>
             ))}
           </div>
-          <button className="primary-button" onClick={() => downloadPdf("presentacion-tactica-liga-dos.pdf", buildEditableReport(model, "presentacion"))} type="button">
+          <button className="primary-button" onClick={() => downloadPdf(`presentacion-tactica-${competitionFileSlug(competition)}.pdf`, `${buildEditableReport(model, "presentacion")}\n${buildShotReportSection(model, rivalShots)}`)} type="button">
             Descargar presentacion PDF
           </button>
         </section>

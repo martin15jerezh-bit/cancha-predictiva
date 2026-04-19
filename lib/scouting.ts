@@ -1039,6 +1039,7 @@ export function buildScoutingModel(
       "Identidad rival",
       "Prediccion",
       "Amenazas",
+      "Lectura carta de tiro",
       "Rotacion",
       "Clave 1",
       "Clave 2",

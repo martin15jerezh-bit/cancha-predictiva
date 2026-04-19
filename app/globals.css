@@ -2324,7 +2324,8 @@ input {
 .shot-summary-strip,
 .shot-player-list,
 .shot-analysis-list,
-.half-split {
+.half-split,
+.shot-tactical-board {
   display: grid;
   gap: 12px;
 }
@@ -2384,6 +2385,91 @@ input {
     linear-gradient(145deg, color-mix(in srgb, var(--team-soft, #dff7f1) 58%, #ffffff) 0%, #ffffff 52%, #fff8f1 100%),
     #ffffff;
   box-shadow: 0 18px 38px rgba(20, 31, 27, 0.12);
+}
+
+.shot-tactical-board {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+  border: 1px solid color-mix(in srgb, var(--team-primary, #0f766e) 18%, rgba(22, 31, 27, 0.12));
+  border-radius: 8px;
+  padding: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--team-soft, #dff7f1) 42%, #ffffff), #ffffff 52%, #fff8f1),
+    #ffffff;
+  box-shadow: 0 18px 38px rgba(20, 31, 27, 0.1);
+}
+
+.shot-tactical-column {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 190px;
+  border: 1px solid rgba(22, 31, 27, 0.1);
+  border-radius: 8px;
+  padding: 13px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 251, 249, 0.94)),
+    #ffffff;
+  box-shadow: 0 10px 24px rgba(20, 31, 27, 0.07);
+}
+
+.shot-tactical-column.profile {
+  border-color: color-mix(in srgb, var(--team-primary, #0f766e) 26%, rgba(22, 31, 27, 0.1));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--team-soft, #dff7f1) 70%, #ffffff), #ffffff 74%),
+    #ffffff;
+}
+
+.shot-tactical-column.strength {
+  border-color: rgba(16, 185, 129, 0.24);
+}
+
+.shot-tactical-column.weakness {
+  border-color: rgba(225, 29, 72, 0.2);
+}
+
+.shot-tactical-column.defense {
+  border-color: rgba(245, 158, 11, 0.28);
+  background:
+    linear-gradient(145deg, #fff7ed, #ffffff 74%),
+    #ffffff;
+}
+
+.shot-tactical-column.attack {
+  border-color: color-mix(in srgb, var(--team-primary, #0f766e) 22%, rgba(22, 31, 27, 0.1));
+}
+
+.shot-tactical-column span {
+  color: color-mix(in srgb, var(--team-primary, #0f766e) 78%, #111);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.shot-tactical-column strong {
+  color: #121713;
+  font-size: 1.02rem;
+  line-height: 1.15;
+}
+
+.shot-tactical-column p,
+.shot-tactical-column small {
+  margin: 0;
+  color: #3f4b44;
+  font-size: 0.88rem;
+  line-height: 1.34;
+}
+
+.shot-tactical-column p {
+  border-left: 3px solid color-mix(in srgb, var(--team-primary, #0f766e) 54%, #ffffff);
+  padding-left: 9px;
+}
+
+.shot-tactical-column small {
+  display: block;
+  border-top: 1px solid rgba(22, 31, 27, 0.08);
+  padding-top: 8px;
+  color: #5a675f;
 }
 
 .shot-player-section {
@@ -2590,6 +2676,15 @@ input {
   background: #fbfdfc;
 }
 
+.shot-trend-card.side-trend {
+  margin-top: 0;
+  border-color: color-mix(in srgb, var(--team-primary, #0f766e) 20%, rgba(22, 31, 27, 0.1));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--team-soft, #dff7f1) 54%, #ffffff), #ffffff 72%),
+    #ffffff;
+  box-shadow: 0 12px 28px rgba(20, 31, 27, 0.08);
+}
+
 .shot-trend-card header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2623,6 +2718,10 @@ input {
   gap: 8px;
 }
 
+.shot-analysis-panel .trend-metric-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .trend-metric-grid article {
   display: grid;
   gap: 3px;
@@ -2641,6 +2740,10 @@ input {
 .trend-metric-grid strong {
   color: #151916;
   font-size: 1.12rem;
+}
+
+.shot-analysis-panel .trend-metric-grid strong {
+  font-size: 1rem;
 }
 
 .shot-trend-card p {
@@ -2716,6 +2819,15 @@ input {
 
 .shot-analysis-list p {
   border-left: 3px solid color-mix(in srgb, var(--team-primary, #0f766e) 72%, #ffffff);
+}
+
+.shot-analysis-list h4 {
+  margin: 0;
+  color: color-mix(in srgb, var(--team-primary, #0f766e) 72%, #111);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .half-split {
@@ -4060,6 +4172,10 @@ input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .shot-tactical-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .shot-court svg {
     min-height: 320px;
   }
@@ -4088,7 +4204,8 @@ input {
   .dashboard-card-pair,
   .dashboard-grid .decision-grid,
   .dashboard-grid .identity-grid,
-  .dashboard-quarter-summary {
+  .dashboard-quarter-summary,
+  .shot-tactical-board {
     grid-template-columns: 1fr;
   }
 
