@@ -89,6 +89,7 @@ export type PlanValidation = {
 export type PlayerScout = {
   name: string;
   teamName: string;
+  shirtNumber?: string;
   role: string;
   playerType: string;
   strength: string;
@@ -437,6 +438,7 @@ function buildPlayerScout(player: PlayerRow, team: TeamRow): PlayerScout {
   return {
     name: player.name,
     teamName: player.teamName,
+    shirtNumber: player.shirtNumber,
     role,
     playerType,
     strength,

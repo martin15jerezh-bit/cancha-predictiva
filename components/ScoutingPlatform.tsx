@@ -467,6 +467,38 @@ function personIdentity(value: string) {
   };
 }
 
+function personGivenTokens(value: string) {
+  const cleaned = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9,]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const [surnamePart, givenPart = ""] = cleaned.split(",").map((part) => part.trim());
+  if (cleaned.includes(",")) {
+    return personNameTokens(givenPart);
+  }
+
+  const tokens = personNameTokens(surnamePart);
+  if (tokens[0]?.length === 1) {
+    return [tokens[0]];
+  }
+  return tokens.length >= 3 ? [tokens[0]] : [];
+}
+
+function givenNamesCompatible(firstName: string, secondName: string) {
+  const firstGiven = personGivenTokens(firstName)[0] ?? "";
+  const secondGiven = personGivenTokens(secondName)[0] ?? "";
+  if (!firstGiven || !secondGiven) {
+    return true;
+  }
+  if (firstGiven.length === 1 || secondGiven.length === 1) {
+    return firstGiven[0] === secondGiven[0];
+  }
+  return firstGiven === secondGiven;
+}
+
 function nameCompletenessScore(value: string) {
   const identity = personIdentity(value);
   return identity.tokens.reduce((score, token) => score + (token.length > 1 ? 2 : 0), 0) + (value.includes(",") ? 1 : 0);
@@ -478,8 +510,11 @@ function sameShotPlayer(playerName: string, shotName: string) {
   if (!player || !shot) {
     return false;
   }
-  if (player === shot || player.includes(shot) || shot.includes(player)) {
+  if (player === shot) {
     return true;
+  }
+  if (!givenNamesCompatible(playerName, shotName)) {
+    return false;
   }
   const playerIdentity = personIdentity(playerName);
   const shotIdentity = personIdentity(shotName);
@@ -494,6 +529,56 @@ function sameShotPlayer(playerName: string, shotName: string) {
   }
 
   return surnameOverlap >= 1 && (initialsCompatible || Math.min(playerSurnames.length, shotSurnames.length) === 1);
+}
+
+function playerIdentityKey(value: string) {
+  const identity = personIdentity(value);
+  const given = personGivenTokens(value)[0] ?? identity.givenInitial;
+  const surnames = identity.surnameTokens.filter((token) => token.length > 2).join("|");
+  return `${given || "?"}|${surnames || normalizePersonName(value)}`;
+}
+
+function normalizeJerseyNumber(value?: string) {
+  return String(value ?? "").trim().replace(/^0+/, "") || String(value ?? "").trim();
+}
+
+function sameShotPlayerInRoster(
+  playerName: string,
+  shotName: string,
+  rosterPlayers: MatchupScout["rivalPlayers"]
+) {
+  if (!sameShotPlayer(playerName, shotName)) {
+    return false;
+  }
+
+  const normalizedPlayer = normalizePersonName(playerName);
+  const normalizedShot = normalizePersonName(shotName);
+  const exactRosterMatches = rosterPlayers.filter((player) => normalizePersonName(player.name) === normalizedShot).length;
+  if (normalizedPlayer && normalizedPlayer === normalizedShot && exactRosterMatches > 0) {
+    return true;
+  }
+
+  const candidateKeys = new Set(
+    rosterPlayers
+      .filter((player) => sameShotPlayer(player.name, shotName))
+      .map((player) => playerIdentityKey(player.name))
+  );
+
+  return candidateKeys.size <= 1;
+}
+
+function sameShotRowForPlayer(
+  player: MatchupScout["rivalPlayers"][number] | undefined,
+  playerName: string,
+  shot: ShotRow,
+  rosterPlayers: MatchupScout["rivalPlayers"]
+) {
+  const playerNumber = normalizeJerseyNumber(player?.shirtNumber);
+  const shotNumber = normalizeJerseyNumber(shot.shirtNumber);
+  if (playerNumber && shotNumber && playerNumber === shotNumber) {
+    return true;
+  }
+  return sameShotPlayerInRoster(playerName, shot.playerName, rosterPlayers);
 }
 
 function uniqueNames(values: Array<string | undefined>) {
@@ -790,7 +875,7 @@ function shotPlanText(playerName: string, shots: ShotRow[], player?: MatchupScou
 
 function buildShotReportSection(model: MatchupScout, shots: ShotRow[]) {
   const playerBlocks = model.rivalPlayers.slice(0, 6).map((player, index) => {
-    const playerShots = shots.filter((shot) => sameShotPlayer(shot.playerName, player.name));
+    const playerShots = shots.filter((shot) => sameShotRowForPlayer(player, player.name, shot, model.rivalPlayers));
     const analysis = buildShotAnalysis(player.name, playerShots, player);
     return [
       `${index + 1}. ${player.name}`,
@@ -925,18 +1010,20 @@ function PlayerTacticalHeader({
   );
 }
 
-function PlayerShotChartSummary({ card }: { card: TacticalPlayerCard }) {
-  const summary = shotSummary(card.shots);
-  const analysis = buildShotAnalysis(card.name, card.shots, card.player);
+function PlayerShotChartSummary({ card, games }: { card: TacticalPlayerCard; games: GameRow[] }) {
+  const latest = latestShotGameForPlayer(card.shots, games);
+  const summary = shotSummary(latest.shots);
+  const analysis = buildShotAnalysis(card.name, latest.shots, card.player);
   return (
     <section className="player-sheet-block shot-block">
       <div className="player-sheet-block-heading">
-        <span>Shot chart + lectura</span>
+        <span>Shot chart ultimo partido</span>
         <strong>{summary.attempts} tiros · {summary.efficiency}</strong>
       </div>
+      <p className="shot-context-line">{latest.label}</p>
       <div className="player-shot-summary-layout">
         <div className="shot-chart-mini">
-          <ShotCourt shots={card.shots} />
+          <ShotCourt shots={latest.shots} />
         </div>
         <div className="shot-readout">
           <p>{analysis.style}</p>
@@ -1055,12 +1142,14 @@ function PlayerAttackPlan({ card }: { card: TacticalPlayerCard }) {
 function PlayerTacticalSheet({
   card,
   players,
+  games,
   onClose,
   onSelect,
   onOpenFull
 }: {
   card: TacticalPlayerCard;
   players: TacticalPlayerCard[];
+  games: GameRow[];
   onClose: () => void;
   onSelect: (name: string) => void;
   onOpenFull: () => void;
@@ -1082,7 +1171,7 @@ function PlayerTacticalSheet({
           onNext={() => onSelect(next.name)}
         />
         <div className="player-sheet-body">
-          <PlayerShotChartSummary card={card} />
+          <PlayerShotChartSummary card={card} games={games} />
           <PlayerDecisionProfile card={card} />
           <PlayerStrengthsWeaknesses card={card} />
           <section className="player-sheet-grid">
@@ -1118,6 +1207,39 @@ function matchIdFromShot(shot: ShotRow) {
   );
 }
 
+function latestShotGameForPlayer(shots: ShotRow[], games: GameRow[]) {
+  if (shots.length === 0) {
+    return { shots: [] as ShotRow[], label: "Sin tiros confirmados en el ultimo partido disponible." };
+  }
+
+  for (const game of games) {
+    const gameMatchId = matchIdFromGame(game);
+    const gameShots = shots.filter((shot) => {
+      const shotMatchId = matchIdFromShot(shot);
+      return shot.gameId === game.gameId || Boolean(gameMatchId && shotMatchId === gameMatchId);
+    });
+
+    if (gameShots.length > 0) {
+      const score = game.homeScore && game.awayScore ? `${game.homeScore}-${game.awayScore}` : "sin marcador";
+      return {
+        shots: gameShots,
+        label: `${game.date} · ${game.homeTeam} ${score} ${game.awayTeam}`
+      };
+    }
+  }
+
+  const fallbackGameIds = [...new Set(shots.map((shot) => matchIdFromShot(shot) ?? shot.gameId))].sort();
+  const latestGameId = fallbackGameIds[fallbackGameIds.length - 1];
+  const fallbackShots = latestGameId
+    ? shots.filter((shot) => (matchIdFromShot(shot) ?? shot.gameId) === latestGameId)
+    : shots;
+
+  return {
+    shots: fallbackShots,
+    label: latestGameId ? `Ultimo partido importado · ${latestGameId}` : "Ultimo partido importado"
+  };
+}
+
 function matchIdFromPlayerGameStat(stat: PlayerGameStatRow) {
   return (
     stat.gameId.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1] ??
@@ -1129,6 +1251,38 @@ function matchIdFromPlayerGameStat(stat: PlayerGameStatRow) {
 function dataUrlFromGame(game: GameRow) {
   const matchId = matchIdFromGame(game);
   return matchId ? `https://fibalivestats.dcd.shared.geniussports.com/data/${matchId}/data.json` : null;
+}
+
+function hasImportedGameDetail(game: GameRow, data: DatasetMap) {
+  if (isUploadedGame(game.gameId, game.notes)) {
+    return true;
+  }
+
+  const gameMatchId = matchIdFromGame(game);
+  const hasShots = (data.shots ?? []).some((shot) => {
+    const shotMatchId = matchIdFromShot(shot);
+    return shot.gameId === game.gameId || Boolean(gameMatchId && shotMatchId === gameMatchId);
+  });
+  const hasPlayerStats = (data.playerGameStats ?? []).some((stat) => {
+    const statMatchId = matchIdFromPlayerGameStat(stat);
+    return stat.gameId === game.gameId || Boolean(gameMatchId && statMatchId === gameMatchId);
+  });
+
+  return hasShots || hasPlayerStats;
+}
+
+function hasOfficialGameResult(game: GameRow) {
+  return game.status === "Final" && Boolean(game.homeScore) && Boolean(game.awayScore);
+}
+
+function gameLoadStatus(game: GameRow, data: DatasetMap) {
+  if (hasImportedGameDetail(game, data)) {
+    return { label: "Completo", tone: "uploaded", caption: "Boxscore y carta disponibles" };
+  }
+  if (hasOfficialGameResult(game)) {
+    return { label: "Resultado", tone: "official", caption: "Marcador oficial sincronizado" };
+  }
+  return { label: "Pendiente", tone: "pending", caption: "Falta marcador o data.json" };
 }
 
 function minutesToDecimal(value: string | undefined) {
@@ -1296,7 +1450,7 @@ function seasonTeamMetrics(team: TeamRow) {
 }
 
 function replaceCompetitionDataset(current: DatasetMap, official: OfficialSyncPayload, competition: CompetitionKey): DatasetMap {
-  const importedGames = current.games.filter((game) => game.competition === competition && isUploadedGame(game.gameId, game.notes));
+  const importedGames = current.games.filter((game) => game.competition === competition && hasImportedGameDetail(game, current));
   const importedByFixture = new Map(importedGames.map((game) => [fixtureKey(game), game]));
   const importedByMatchId = new Map<string, GameRow>();
   importedGames.forEach((game) => {
@@ -1317,7 +1471,7 @@ function replaceCompetitionDataset(current: DatasetMap, official: OfficialSyncPa
     return !officialKeys.has(fixtureKey(game)) && (!matchId || !officialMatchIds.has(matchId));
   });
 
-  return {
+  return applyBoxscoreImports({
     teams: [
       ...current.teams.filter((team) => team.competition !== competition),
       ...official.teams
@@ -1333,7 +1487,7 @@ function replaceCompetitionDataset(current: DatasetMap, official: OfficialSyncPa
     ],
     playerGameStats: current.playerGameStats ?? [],
     shots: current.shots ?? []
-  };
+  }, []);
 }
 
 function migrateStoredDataset(current: DatasetMap): DatasetMap {
@@ -1347,7 +1501,7 @@ function migrateStoredDataset(current: DatasetMap): DatasetMap {
   const seedLigaTeams = seedData.teams.filter((team) => team.competition === LIGA_DOS_COMPETITION);
   const seedLigaPlayers = seedData.players.filter((player) => player.competition === LIGA_DOS_COMPETITION);
   const seedLigaGames = seedData.games.filter((game) => game.competition === LIGA_DOS_COMPETITION);
-  const importedGames = normalizedCurrent.games.filter((game) => game.competition === LIGA_DOS_COMPETITION && isUploadedGame(game.gameId, game.notes));
+  const importedGames = normalizedCurrent.games.filter((game) => game.competition === LIGA_DOS_COMPETITION && hasImportedGameDetail(game, normalizedCurrent));
   const importedKeys = new Set(importedGames.map(fixtureKey));
 
   return {
@@ -1934,7 +2088,7 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
   const generatedAt = new Date().toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" });
   const maxQuarterPoints = Math.max(...model.quarterModel.flatMap((quarter) => [quarter.pointsFor, quarter.pointsAgainst]), 1);
   const maxQuarterDiff = Math.max(...model.quarterModel.map((quarter) => Math.abs(quarter.differential)), 1);
-  const topThreatShots = topThreat ? shots.filter((shot) => sameShotPlayer(shot.playerName, topThreat.name)) : [];
+  const topThreatShots = topThreat ? shots.filter((shot) => sameShotRowForPlayer(topThreat, topThreat.name, shot, model.rivalPlayers)) : [];
   const shotFocus = topThreatShots.length > 0 ? topThreatShots : shots;
   const shotFocusMade = shotFocus.filter((shot) => shot.made).length;
   const radarMetrics = [
@@ -2622,8 +2776,9 @@ export function ScoutingPlatform() {
     .filter((game) => game.competition === competition)
     .sort((gameA, gameB) => gameB.date.localeCompare(gameA.date));
   const competitionPlayers = data.players.filter((player) => player.competition === competition);
-  const uploadedGames = competitionGames.filter((game) => isUploadedGame(game.gameId, game.notes));
-  const pendingGames = competitionGames.filter((game) => !isUploadedGame(game.gameId, game.notes));
+  const completeGames = competitionGames.filter((game) => gameLoadStatus(game, data).label === "Completo");
+  const officialResultGames = competitionGames.filter((game) => gameLoadStatus(game, data).label === "Resultado");
+  const pendingGames = competitionGames.filter((game) => gameLoadStatus(game, data).label === "Pendiente");
   const playerRows = isPlayerView ? model.rivalPlayers.slice(0, 4) : model.rivalPlayers.slice(0, 10);
   const ownLead = model.ownPlayers[0];
   const rivalThreat = model.rivalPlayers[0];
@@ -2703,6 +2858,15 @@ export function ScoutingPlatform() {
     ? Math.max(rivalShotImportGames.length, new Set(activeRivalShots.map((shot) => matchIdFromShot(shot) ?? shot.gameId)).size)
     : 1;
   const mainThreatName = model.rivalPlayers[0]?.name;
+  const rivalPlayerForName = (name: string) =>
+    model.rivalPlayers.find((player) => normalizePersonName(player.name) === normalizePersonName(name)) ??
+    model.rivalPlayers.find((player) => sameShotPlayerInRoster(player.name, name, model.rivalPlayers));
+  const rivalShotBelongsToPlayer = (
+    name: string,
+    shot: ShotRow,
+    player = rivalPlayerForName(name)
+  ) => sameShotRowForPlayer(player, name, shot, model.rivalPlayers);
+  const rivalShotCountForName = (name: string) => rivalShots.filter((shot) => rivalShotBelongsToPlayer(name, shot)).length;
   const starterNamesAfterThreat = model.rivalRotation.starters
     .filter((name) => !mainThreatName || !sameShotPlayer(name, mainThreatName))
     .slice(0, 4);
@@ -2717,16 +2881,21 @@ export function ScoutingPlatform() {
     ...model.rivalPlayers.slice(0, 12).map((player) => player.name)
   ]);
   const confirmedShotPlayerNames = uniqueNames(rivalShots.map((shot) => shot.playerName))
+    .filter((name) => {
+      const exactRosterMatches = model.rivalPlayers.filter((player) => normalizePersonName(player.name) === normalizePersonName(name)).length;
+      const compatibleRosterMatches = model.rivalPlayers.filter((player) => sameShotPlayer(player.name, name)).length;
+      return exactRosterMatches > 0 || compatibleRosterMatches <= 1;
+    })
     .sort((nameA, nameB) => {
-      const shotsA = rivalShots.filter((shot) => sameShotPlayer(nameA, shot.playerName)).length;
-      const shotsB = rivalShots.filter((shot) => sameShotPlayer(nameB, shot.playerName)).length;
+      const shotsA = rivalShotCountForName(nameA);
+      const shotsB = rivalShotCountForName(nameB);
       return shotsB - shotsA;
     })
     .slice(0, 12);
   const shotPlayerNames = uniqueNames([...rotationCandidates, ...confirmedShotPlayerNames]).slice(0, 9);
   const shotPlayerCards: ShotPlayerCard[] = shotPlayerNames.map((name, index) => {
-    const player = model.rivalPlayers.find((item) => sameShotPlayer(item.name, name));
-    const playerShots = rivalShots.filter((shot) => sameShotPlayer(name, shot.playerName));
+    const player = rivalPlayerForName(name);
+    const playerShots = rivalShots.filter((shot) => rivalShotBelongsToPlayer(name, shot, player));
     const isMainThreat = Boolean(mainThreatName && sameShotPlayer(name, mainThreatName));
     const isStarter = model.rivalRotation.starters.some((starter) => sameShotPlayer(starter, name));
     const firstChangeIndex = model.rivalRotation.firstChanges.findIndex((change) => sameShotPlayer(change, name));
@@ -3097,16 +3266,17 @@ export function ScoutingPlatform() {
           <div className="module-heading">
             <div>
               <p className="eyebrow">Base de datos</p>
-              <h3>Partidos subidos vs pendientes</h3>
+              <h3>Estado de partidos</h3>
             </div>
-            <EvidencePill evidence="dato confirmado" confidence={uploadedGames.length > 0 ? uploadedGames.length / Math.max(competitionGames.length, 1) : 0} />
+            <EvidencePill evidence="dato confirmado" confidence={(completeGames.length + officialResultGames.length) / Math.max(competitionGames.length, 1)} />
           </div>
           <div className="load-summary">
             <MetricTile label="Equipos oficiales" value={String(teams.length)} caption={`${leagueCopy.shortLabel} separada por zonas o fase`} />
             <MetricTile label="Jugadores en base" value={String(competitionPlayers.length)} caption="Rosters y estadisticas por equipo" />
             <MetricTile label="Partidos en base" value={String(competitionGames.length)} caption="Fixture, resultados e imports locales" />
-            <MetricTile label="Boxscores subidos" value={String(uploadedGames.length)} caption="Listos para scouting de jugadores y rotacion" />
-            <MetricTile label="Pendientes" value={String(pendingGames.length)} caption="Falta link de Estadisticas completas o data.json" />
+            <MetricTile label="Detalle completo" value={String(completeGames.length)} caption="Boxscore, jugadores y carta de tiro" />
+            <MetricTile label="Resultado oficial" value={String(officialResultGames.length)} caption="Marcador sincronizado; alimenta dashboard y equipos" />
+            <MetricTile label="Pendientes reales" value={String(pendingGames.length)} caption="Falta marcador o data.json" />
           </div>
           {canAdmin ? (
             <div className="sync-strip">
@@ -3128,19 +3298,19 @@ export function ScoutingPlatform() {
               </thead>
               <tbody>
                 {competitionGames.map((game) => {
-                  const uploaded = isUploadedGame(game.gameId, game.notes);
+                  const status = gameLoadStatus(game, data);
                   return (
                     <tr key={game.gameId}>
                       <td>
-                        <span className={`upload-status ${uploaded ? "uploaded" : "pending"}`}>
-                          {uploaded ? "Subido" : "Pendiente"}
+                        <span className={`upload-status ${status.tone}`}>
+                          {status.label}
                         </span>
                       </td>
                       <td>{game.date}</td>
                       <td>{game.homeTeam} vs {game.awayTeam}</td>
                       <td>{game.homeScore && game.awayScore ? `${game.homeScore}-${game.awayScore}` : "Sin marcador"}</td>
                       <td>{game.phase}</td>
-                      <td>{game.notes}</td>
+                      <td>{game.notes} · {status.caption}</td>
                     </tr>
                   );
                 })}
@@ -3273,6 +3443,7 @@ export function ScoutingPlatform() {
           {selectedTacticalCard ? (
             <PlayerTacticalSheet
               card={selectedTacticalCard}
+              games={rivalShotImportGames}
               players={tacticalPlayerCards}
               onClose={() => setSelectedTacticalPlayer("")}
               onSelect={setSelectedTacticalPlayer}

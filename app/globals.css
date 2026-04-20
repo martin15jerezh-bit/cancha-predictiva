@@ -2409,6 +2409,16 @@ input {
   line-height: 1.4;
 }
 
+.shot-context-line {
+  border: 1px solid rgba(22, 31, 27, 0.08);
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: #64716b;
+  background: color-mix(in srgb, var(--team-soft, #dff7f1) 42%, #ffffff);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .player-sheet-block ul {
   display: grid;
   gap: 8px;
@@ -4519,6 +4529,11 @@ input {
 .upload-status.uploaded {
   color: #0f766e;
   background: #e2f8f3;
+}
+
+.upload-status.official {
+  color: #1d4ed8;
+  background: #e8f0ff;
 }
 
 .upload-status.pending {

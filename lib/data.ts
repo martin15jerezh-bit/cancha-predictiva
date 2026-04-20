@@ -1194,6 +1194,10 @@ function matchIdFromStoredGame(game: GameRow) {
   return game.gameId.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1] ?? game.notes.match(/(?:FIBA|Genius)\s+(\d+)/)?.[1];
 }
 
+function matchIdFromStoredGameId(gameId: string) {
+  return gameId.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1];
+}
+
 function gameIdentityKey(game: GameRow) {
   const matchId = matchIdFromStoredGame(game);
   if (matchId) {
@@ -1231,6 +1235,21 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
   const importedPlayers = imports.flatMap((item) => item.players);
   const importedPlayerGameStats = imports.flatMap((item) => item.playerGameStats ?? []);
   const importedShots = imports.flatMap((item) => item.shots ?? []);
+  const importedDetailGameIds = new Set([
+    ...importedGames.map((game) => game.gameId),
+    ...importedPlayerGameStats.map((stat) => stat.gameId),
+    ...importedShots.map((shot) => shot.gameId)
+  ]);
+  const importedDetailMatchIds = new Set(
+    [
+      ...importedGames.map(matchIdFromStoredGame),
+      ...Array.from(importedDetailGameIds).map(matchIdFromStoredGameId)
+    ].filter(Boolean) as string[]
+  );
+  const belongsToImportedDetail = (gameId: string) => {
+    const matchId = matchIdFromStoredGameId(gameId);
+    return importedDetailGameIds.has(gameId) || Boolean(matchId && importedDetailMatchIds.has(matchId));
+  };
   const games = mergeGamesByIdentity(data.games, importedGames);
   const players = mergeRowsByKey(
     data.players,
@@ -1238,12 +1257,12 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
     (player) => `${player.teamName}-${player.name}`
   );
   const playerGameStats = mergeRowsByKey<PlayerGameStatRow>(
-    data.playerGameStats ?? [],
+    (data.playerGameStats ?? []).filter((stat) => !belongsToImportedDetail(stat.gameId)),
     importedPlayerGameStats,
     (stat) => stat.statId
   );
   const shots = mergeRowsByKey<ShotRow>(
-    data.shots ?? [],
+    (data.shots ?? []).filter((shot) => !belongsToImportedDetail(shot.gameId)),
     importedShots,
     (shot) => shot.shotId
   );
@@ -1275,10 +1294,6 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
     const importedStats = imports
       .flatMap((item) => item.teamStats)
       .filter((stat) => areSameTeam(stat.teamName, team.name));
-
-    if (team.teamId.startsWith("GENIUS-")) {
-      return team;
-    }
 
     const teamGames = games.filter((game) => {
       return game.status === "Final" && (areSameTeam(game.homeTeam, team.name) || areSameTeam(game.awayTeam, team.name));

@@ -14,6 +14,9 @@ type FibaTeam = {
     {
       name?: string;
       scoreboardName?: string;
+      shirtNumber?: string | number;
+      pno?: string | number;
+      bib?: string | number;
       playingPosition?: string;
       sMinutes?: string;
       sPoints?: number;
@@ -38,7 +41,7 @@ type FibaTeam = {
     x?: number;
     y?: number;
     p?: number;
-    pno?: number;
+    pno?: string | number;
     tno?: number;
     per?: number;
     actionType?: string;
@@ -348,12 +351,13 @@ function slugify(value: string) {
 }
 
 function toPlayerRows(teamName: string, team: FibaTeam, competition: CompetitionKey): PlayerRow[] {
-  return Object.values(team.pl ?? {})
-    .map((player, index) => ({
+  return Object.entries(team.pl ?? {})
+    .map(([playerKey, player], index) => ({
       playerId: `${slugify(teamName)}-${slugify(player.name ?? player.scoreboardName ?? `jugador-${index + 1}`)}`,
       competition,
       teamName,
       name: player.name ?? player.scoreboardName ?? `Jugador ${index + 1}`,
+      shirtNumber: String(player.shirtNumber ?? player.pno ?? player.bib ?? (/^\d+$/.test(playerKey) ? playerKey : "")),
       position: player.playingPosition ?? "",
       minutes: String(player.sMinutes ?? "0:00"),
       points: String(player.sPoints ?? 0),
@@ -373,6 +377,30 @@ function toPlayerRows(teamName: string, team: FibaTeam, competition: Competition
       starter: player.starter ? "si" : "no",
       games: "1"
     }));
+}
+
+function rosterNumber(playerKey: string, player: NonNullable<FibaTeam["pl"]>[string]) {
+  return String(player.shirtNumber ?? player.pno ?? player.bib ?? (/^\d+$/.test(playerKey) ? playerKey : ""));
+}
+
+function normalizeRosterNumber(value?: string | number) {
+  const raw = String(value ?? "").trim();
+  return raw.replace(/^0+/, "") || raw;
+}
+
+function shotRosterPlayer(team: FibaTeam, shot: NonNullable<FibaTeam["shot"]>[number]) {
+  const shotNumber = normalizeRosterNumber(shot.pno ?? shot.shirtNumber);
+  if (!shotNumber) {
+    return null;
+  }
+
+  const entries = Object.entries(team.pl ?? {});
+  const direct = entries.find(([playerKey]) => normalizeRosterNumber(playerKey) === shotNumber);
+  if (direct) {
+    return direct[1];
+  }
+
+  return entries.find(([playerKey, player]) => normalizeRosterNumber(rosterNumber(playerKey, player)) === shotNumber)?.[1] ?? null;
 }
 
 function toPlayerGameStatRows({
@@ -410,22 +438,27 @@ function toShotRows({
   sourceUrl: string;
 }): ShotRow[] {
   return (team.shot ?? [])
-    .filter((shot) => typeof shot.x === "number" && typeof shot.y === "number" && Boolean(shot.player))
-    .map((shot, index) => ({
-      shotId: `${gameId}-${teamName}-${shot.actionNumber ?? index}-${shot.player ?? "jugador"}`,
-      gameId,
-      competition,
-      teamName,
-      playerName: shot.player ?? "Jugador sin nombre",
-      shirtNumber: String(shot.shirtNumber ?? ""),
-      period: Number(shot.per ?? 0),
-      actionType: shot.actionType ?? "",
-      subType: shot.subType ?? "",
-      made: Number(shot.r ?? 0) === 1,
-      x: Number(shot.x),
-      y: Number(shot.y),
-      sourceUrl
-    }));
+    .filter((shot) => typeof shot.x === "number" && typeof shot.y === "number" && Boolean(shot.player || shot.pno || shot.shirtNumber))
+    .map((shot, index) => {
+      const rosterPlayer = shotRosterPlayer(team, shot);
+      const playerName = rosterPlayer?.name ?? rosterPlayer?.scoreboardName ?? shot.player ?? "Jugador sin nombre";
+      const shotNumber = String(shot.shirtNumber ?? shot.pno ?? "");
+      return {
+        shotId: `${gameId}-${teamName}-${shot.actionNumber ?? index}-${playerName}`,
+        gameId,
+        competition,
+        teamName,
+        playerName,
+        shirtNumber: rosterPlayer ? rosterNumber(String(shot.pno ?? ""), rosterPlayer) || shotNumber : shotNumber,
+        period: Number(shot.per ?? 0),
+        actionType: shot.actionType ?? "",
+        subType: shot.subType ?? "",
+        made: Number(shot.r ?? 0) === 1,
+        x: Number(shot.x),
+        y: Number(shot.y),
+        sourceUrl
+      };
+    });
 }
 
 async function importBoxscore(target: ImportTarget, competition: CompetitionKey): Promise<BoxscoreImport> {

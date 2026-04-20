@@ -26,6 +26,7 @@ export type PlayerRow = {
   competition: string;
   teamName: string;
   name: string;
+  shirtNumber?: string;
   position: string;
   minutes: string;
   points: string;
