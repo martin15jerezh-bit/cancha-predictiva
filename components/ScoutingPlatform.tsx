@@ -415,10 +415,10 @@ function normalizePersonName(value: string) {
     .trim();
 }
 
-function personNameTokens(value: string) {
+function personNameTokens(value: string, includeInitials = false) {
   return normalizePersonName(value)
     .split(" ")
-    .filter((token) => token.length > 1);
+    .filter((token) => (includeInitials ? token.length > 0 : token.length > 1));
 }
 
 function personIdentity(value: string) {
@@ -432,7 +432,7 @@ function personIdentity(value: string) {
   const [surnamePart, givenPart = ""] = cleaned.split(",").map((part) => part.trim());
   const hasComma = cleaned.includes(",");
   const normalizedSurnameTokens = personNameTokens(surnamePart);
-  const normalizedGivenTokens = personNameTokens(givenPart);
+  const normalizedGivenTokens = personNameTokens(givenPart, true);
 
   if (hasComma) {
     return {
@@ -442,7 +442,7 @@ function personIdentity(value: string) {
     };
   }
 
-  const tokens = personNameTokens(value);
+  const tokens = personNameTokens(value, true);
   if (tokens.length === 0) {
     return { givenInitial: "", surnameTokens: [], tokens: [] };
   }
@@ -477,10 +477,10 @@ function personGivenTokens(value: string) {
     .trim();
   const [surnamePart, givenPart = ""] = cleaned.split(",").map((part) => part.trim());
   if (cleaned.includes(",")) {
-    return personNameTokens(givenPart);
+    return personNameTokens(givenPart, true);
   }
 
-  const tokens = personNameTokens(surnamePart);
+  const tokens = personNameTokens(surnamePart, true);
   if (tokens[0]?.length === 1) {
     return [tokens[0]];
   }
@@ -1010,20 +1010,19 @@ function PlayerTacticalHeader({
   );
 }
 
-function PlayerShotChartSummary({ card, games }: { card: TacticalPlayerCard; games: GameRow[] }) {
-  const latest = latestShotGameForPlayer(card.shots, games);
-  const summary = shotSummary(latest.shots);
-  const analysis = buildShotAnalysis(card.name, latest.shots, card.player);
+function PlayerShotChartSummary({ card, contextLabel }: { card: TacticalPlayerCard; contextLabel: string }) {
+  const summary = shotSummary(card.shots);
+  const analysis = buildShotAnalysis(card.name, card.shots, card.player);
   return (
     <section className="player-sheet-block shot-block">
       <div className="player-sheet-block-heading">
         <span>Shot chart ultimo partido</span>
         <strong>{summary.attempts} tiros · {summary.efficiency}</strong>
       </div>
-      <p className="shot-context-line">{latest.label}</p>
+      <p className="shot-context-line">{contextLabel}</p>
       <div className="player-shot-summary-layout">
         <div className="shot-chart-mini">
-          <ShotCourt shots={latest.shots} />
+          <ShotCourt shots={card.shots} />
         </div>
         <div className="shot-readout">
           <p>{analysis.style}</p>
@@ -1157,13 +1156,15 @@ function PlayerTacticalSheet({
   const index = Math.max(0, players.findIndex((player) => sameShotPlayer(player.name, card.name)));
   const previous = players[(index - 1 + players.length) % players.length] ?? card;
   const next = players[(index + 1) % players.length] ?? card;
+  const latest = latestShotGameForPlayer(card.shots, games);
+  const latestCard: TacticalPlayerCard = { ...card, shots: latest.shots };
 
   return (
     <div className="player-sheet-layer" role="presentation">
       <button className="player-sheet-backdrop" onClick={onClose} type="button" aria-label="Cerrar ficha tactica" />
       <aside aria-modal="true" className="player-sheet" role="dialog" aria-labelledby="player-sheet-title">
         <PlayerTacticalHeader
-          card={card}
+          card={latestCard}
           index={index}
           total={players.length}
           onClose={onClose}
@@ -1171,12 +1172,12 @@ function PlayerTacticalSheet({
           onNext={() => onSelect(next.name)}
         />
         <div className="player-sheet-body">
-          <PlayerShotChartSummary card={card} games={games} />
-          <PlayerDecisionProfile card={card} />
-          <PlayerStrengthsWeaknesses card={card} />
+          <PlayerShotChartSummary card={latestCard} contextLabel={latest.label} />
+          <PlayerDecisionProfile card={latestCard} />
+          <PlayerStrengthsWeaknesses card={latestCard} />
           <section className="player-sheet-grid">
-            <PlayerDefensivePlan card={card} />
-            <PlayerAttackPlan card={card} />
+            <PlayerDefensivePlan card={latestCard} />
+            <PlayerAttackPlan card={latestCard} />
           </section>
           <button className="primary-button player-full-button" onClick={onOpenFull} type="button">
             Ver analisis completo
