@@ -1294,13 +1294,27 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
     const importedStats = imports
       .flatMap((item) => item.teamStats)
       .filter((stat) => areSameTeam(stat.teamName, team.name));
+    const hasOfficialStanding = team.teamId.startsWith("GENIUS-");
 
     const teamGames = games.filter((game) => {
       return game.status === "Final" && (areSameTeam(game.homeTeam, team.name) || areSameTeam(game.awayTeam, team.name));
     });
 
-    if (teamGames.length === 0) {
-      return team;
+    if (teamGames.length === 0 || hasOfficialStanding) {
+      const rebounds =
+        importedStats.length === 0
+          ? team.reboundsPerGame
+          : (importedStats.reduce((sum, stat) => sum + stat.rebounds, 0) / importedStats.length).toFixed(1);
+      const assists =
+        importedStats.length === 0
+          ? team.assistsPerGame
+          : (importedStats.reduce((sum, stat) => sum + stat.assists, 0) / importedStats.length).toFixed(1);
+
+      return {
+        ...team,
+        reboundsPerGame: rebounds,
+        assistsPerGame: assists
+      };
     }
 
     const totals = teamGames.reduce(
