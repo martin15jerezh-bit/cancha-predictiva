@@ -1469,6 +1469,9 @@ function replaceCompetitionDataset(current: DatasetMap, official: OfficialSyncPa
   });
   const preservedImportedGames = importedGames.filter((game) => {
     const matchId = matchIdFromGame(game);
+    if (game.gameId.startsWith("GENIUS-")) {
+      return false;
+    }
     return !officialKeys.has(fixtureKey(game)) && (!matchId || !officialMatchIds.has(matchId));
   });
 
