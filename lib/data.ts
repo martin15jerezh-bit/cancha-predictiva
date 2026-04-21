@@ -1299,6 +1299,31 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
     const teamGames = games.filter((game) => {
       return game.status === "Final" && (areSameTeam(game.homeTeam, team.name) || areSameTeam(game.awayTeam, team.name));
     });
+    const officialTeamGames = games.filter((game) => {
+      return (
+        game.gameId.startsWith("GENIUS-") &&
+        game.status === "Final" &&
+        (areSameTeam(game.homeTeam, team.name) || areSameTeam(game.awayTeam, team.name))
+      );
+    });
+
+    const computeTotals = (rows: GameRow[]) =>
+      rows.reduce(
+        (acc, game) => {
+          const isHome = areSameTeam(game.homeTeam, team.name);
+          const pointsFor = parseNumber(isHome ? game.homeScore : game.awayScore);
+          const pointsAgainst = parseNumber(isHome ? game.awayScore : game.homeScore);
+          const won = pointsFor > pointsAgainst;
+
+          return {
+            pointsFor: acc.pointsFor + pointsFor,
+            pointsAgainst: acc.pointsAgainst + pointsAgainst,
+            wins: acc.wins + (won ? 1 : 0),
+            losses: acc.losses + (won ? 0 : 1)
+          };
+        },
+        { pointsFor: 0, pointsAgainst: 0, wins: 0, losses: 0 }
+      );
 
     if (teamGames.length === 0 || hasOfficialStanding) {
       const rebounds =
@@ -1309,30 +1334,21 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
         importedStats.length === 0
           ? team.assistsPerGame
           : (importedStats.reduce((sum, stat) => sum + stat.assists, 0) / importedStats.length).toFixed(1);
+      const officialTotals = officialTeamGames.length > 0 ? computeTotals(officialTeamGames) : null;
 
       return {
         ...team,
+        gamesPlayed: officialTotals ? String(officialTeamGames.length) : team.gamesPlayed,
+        wins: officialTotals ? String(officialTotals.wins) : team.wins,
+        losses: officialTotals ? String(officialTotals.losses) : team.losses,
+        pointsFor: officialTotals ? String(officialTotals.pointsFor) : team.pointsFor,
+        pointsAgainst: officialTotals ? String(officialTotals.pointsAgainst) : team.pointsAgainst,
         reboundsPerGame: rebounds,
         assistsPerGame: assists
       };
     }
 
-    const totals = teamGames.reduce(
-      (acc, game) => {
-        const isHome = areSameTeam(game.homeTeam, team.name);
-        const pointsFor = parseNumber(isHome ? game.homeScore : game.awayScore);
-        const pointsAgainst = parseNumber(isHome ? game.awayScore : game.homeScore);
-        const won = pointsFor > pointsAgainst;
-
-        return {
-          pointsFor: acc.pointsFor + pointsFor,
-          pointsAgainst: acc.pointsAgainst + pointsAgainst,
-          wins: acc.wins + (won ? 1 : 0),
-          losses: acc.losses + (won ? 0 : 1)
-        };
-      },
-      { pointsFor: 0, pointsAgainst: 0, wins: 0, losses: 0 }
-    );
+    const totals = computeTotals(teamGames);
 
     const rebounds =
       importedStats.length === 0
