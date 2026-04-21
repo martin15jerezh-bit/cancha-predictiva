@@ -2420,6 +2420,25 @@ function loadJson<T>(key: string, fallback: T): T {
   }
 }
 
+function ensureDatasetMap(value: unknown): DatasetMap {
+  const candidate = value && typeof value === "object" ? (value as Partial<DatasetMap>) : {};
+  return {
+    teams: Array.isArray(candidate.teams) ? candidate.teams : seedData.teams,
+    players: Array.isArray(candidate.players) ? candidate.players : seedData.players,
+    games: Array.isArray(candidate.games) ? candidate.games : seedData.games,
+    playerGameStats: Array.isArray(candidate.playerGameStats) ? candidate.playerGameStats : [],
+    shots: Array.isArray(candidate.shots) ? candidate.shots : []
+  };
+}
+
+function ensureSourceTrace(value: unknown): SourceTrace[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function ensureNotes(value: unknown): PrivateNote[] {
+  return Array.isArray(value) ? value : [];
+}
+
 export function ScoutingPlatform() {
   const [data, setData] = useState<DatasetMap>(seedData);
   const [sourceTrace, setSourceTrace] = useState<SourceTrace[]>([]);
@@ -2446,9 +2465,14 @@ export function ScoutingPlatform() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setData(migrateStoredDataset(loadJson(STORAGE_KEY, seedData)));
-      setSourceTrace(loadJson(TRACE_KEY, []));
-      setNotes(loadJson("dos-premium-notes-v1", []));
+      try {
+        const storedDataset = ensureDatasetMap(loadJson(STORAGE_KEY, seedData));
+        setData(migrateStoredDataset(storedDataset));
+      } catch {
+        setData(seedData);
+      }
+      setSourceTrace(ensureSourceTrace(loadJson(TRACE_KEY, [])));
+      setNotes(ensureNotes(loadJson("dos-premium-notes-v1", [])));
       setStorageReady(true);
     }, 0);
     return () => window.clearTimeout(timer);
