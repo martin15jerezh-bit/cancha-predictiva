@@ -1197,7 +1197,7 @@ function fixtureKey(game: GameRow) {
 }
 
 function matchIdFromGame(game: GameRow) {
-  return game.gameId.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1] ?? game.notes.match(/(?:FIBA|Genius)\s+(\d+)/)?.[1];
+  return game.gameId?.match(/(?:FIBA|GENIUS)-(\d+)/)?.[1] ?? game.notes?.match(/(?:FIBA|Genius)\s+(\d+)/)?.[1];
 }
 
 function matchIdFromShot(shot: ShotRow) {
@@ -1727,9 +1727,16 @@ function addMetricCard(
   addShadowRect(commands, x, y - height, width, height, [1, 1, 1], [0.84, 0.87, 0.84]);
   addRect(commands, x, y - 5, width, 5, accent);
   addRect(commands, x, y - height, 5, height, accent);
+  const compact = height < 82;
+  const valueSize = compact ? 14 : 18;
+  const valueLineHeight = compact ? 16 : 20;
+  const valueMaxLines = compact ? 1 : 2;
+  const captionSize = compact ? 8.6 : 9.5;
+  const captionLineHeight = compact ? 10.5 : 12;
+  const captionMaxLines = compact ? 1 : 2;
   addText(commands, label.toUpperCase(), x + 12, y - 22, 8.5, accent, "F2");
-  addWrappedText(commands, value, x + 16, y - 48, width - 30, 18, [0.06, 0.08, 0.07], "F2", 20, 2);
-  addWrappedText(commands, caption, x + 12, y - height + 28, width - 24, 9.5, [0.36, 0.42, 0.39], "F1", 12, 2);
+  addWrappedText(commands, value, x + 16, compact ? y - 40 : y - 48, width - 30, valueSize, [0.06, 0.08, 0.07], "F2", valueLineHeight, valueMaxLines);
+  addWrappedText(commands, caption, x + 12, compact ? y - height + 18 : y - height + 28, width - 24, captionSize, [0.36, 0.42, 0.39], "F1", captionLineHeight, captionMaxLines);
 }
 
 function addHeader(commands: string[], title: string, subtitle: string, pageNumber: string, primary: PdfRgb) {
@@ -1775,10 +1782,10 @@ function addDot(commands: string[], x: number, y: number, size: number, fill: Pd
 }
 
 function addFooter(commands: string[], page: string, model: MatchupScout, primary: PdfRgb) {
-  addLine(commands, 36, 30, 924, 30, [0.84, 0.86, 0.84], 0.8);
-  addText(commands, "DOS Scout Pro · Dossier tactico", 38, 16, 8.5, [0.36, 0.42, 0.39], "F2");
-  addText(commands, `${model.ownTeam.team.name} vs ${model.rivalTeam.team.name}`, 340, 16, 8.5, [0.36, 0.42, 0.39], "F1");
-  addText(commands, page, 882, 16, 8.5, primary, "F2");
+  addLine(commands, 36, 24, 924, 24, [0.84, 0.86, 0.84], 0.8);
+  addText(commands, "DOS Scout Pro · Dossier tactico", 38, 10, 8, [0.36, 0.42, 0.39], "F2");
+  addText(commands, `${model.ownTeam.team.name} vs ${model.rivalTeam.team.name}`, 340, 10, 8, [0.36, 0.42, 0.39], "F1");
+  addText(commands, page, 884, 10, 8, primary, "F2");
 }
 
 function pairScores(ownValue: number, rivalValue: number, lowerIsBetter = false) {
@@ -1833,6 +1840,250 @@ function addRadarChart(
   addPolygon(commands, metrics.map((metric, index) => pointFor(metric.own, index)), [0.88, 0.97, 0.94], primary, 2.2);
   addText(commands, "Propio", x + 8, y - 12, 9, primary, "F2");
   addText(commands, "Rival", x + 74, y - 12, 9, red, "F2");
+}
+
+function addSingleRadarChart(
+  commands: string[],
+  metrics: Array<{ label: string; value: number }>,
+  x: number,
+  y: number,
+  radius: number,
+  color: PdfRgb,
+  label: string
+) {
+  const centerX = x + radius;
+  const centerY = y + radius;
+  const pointFor = (value: number, index: number, scale = 1): [number, number] => {
+    const angle = -Math.PI / 2 + (index / metrics.length) * Math.PI * 2;
+    const r = radius * scale * clampPdf(value, 0, 100) / 100;
+    return [Number((centerX + Math.cos(angle) * r).toFixed(2)), Number((centerY + Math.sin(angle) * r).toFixed(2))];
+  };
+
+  [0.33, 0.66, 1].forEach((scale) => {
+    const ring = metrics.map((_, index) => pointFor(100, index, scale));
+    addPolygon(commands, ring, [0.98, 0.99, 0.98], [0.84, 0.87, 0.84], 0.8);
+  });
+
+  metrics.forEach((metric, index) => {
+    const edge = pointFor(100, index);
+    addLine(commands, centerX, centerY, edge[0], edge[1], [0.84, 0.87, 0.84], 0.8);
+    const labelPoint = pointFor(118, index);
+    addWrappedText(commands, metric.label, labelPoint[0] - 34, labelPoint[1] + 5, 68, 8.2, [0.36, 0.42, 0.39], "F2", 9.5, 2);
+  });
+
+  addPolygon(commands, metrics.map((metric, index) => pointFor(metric.value, index)), [0.88, 0.97, 0.94], color, 2.2);
+  addText(commands, label, x + 8, y - 12, 9, color, "F2");
+}
+
+function addMomentumLineChart(
+  commands: string[],
+  quarters: MatchupScout["quarterModel"],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  primary: PdfRgb
+) {
+  const red: PdfRgb = [0.88, 0.11, 0.28];
+  const amber: PdfRgb = [0.96, 0.62, 0.04];
+  const maxValue = Math.max(...quarters.flatMap((quarter) => [quarter.pointsFor, quarter.pointsAgainst]), 1);
+  const chartBottom = y + height - 26;
+  const chartTop = y + 18;
+  const chartHeight = chartBottom - chartTop;
+  const stepX = quarters.length > 1 ? width / (quarters.length - 1) : width;
+  const pointFor = (value: number, index: number) => ({
+    x: x + index * stepX,
+    y: chartBottom - (value / maxValue) * chartHeight
+  });
+
+  [0, 0.5, 1].forEach((ratio) => {
+    const guideY = chartBottom - chartHeight * ratio;
+    addLine(commands, x, guideY, x + width, guideY, [0.9, 0.92, 0.9], 0.8);
+    addText(commands, formatPdfNumber(maxValue * ratio), x - 22, guideY - 2, 7.5, [0.42, 0.47, 0.44], "F1");
+  });
+
+  const ownPoints = quarters.map((quarter, index) => pointFor(quarter.pointsFor, index));
+  const rivalPoints = quarters.map((quarter, index) => pointFor(quarter.pointsAgainst, index));
+  const bestQuarter = [...quarters].sort((a, b) => b.differential - a.differential)[0]?.quarter;
+  const riskQuarter = [...quarters].sort((a, b) => a.differential - b.differential)[0]?.quarter;
+
+  ownPoints.forEach((point, index) => {
+    if (index === 0) {
+      return;
+    }
+    const previous = ownPoints[index - 1];
+    addLine(commands, previous.x, previous.y, point.x, point.y, primary, 2.2);
+  });
+
+  rivalPoints.forEach((point, index) => {
+    if (index === 0) {
+      return;
+    }
+    const previous = rivalPoints[index - 1];
+    addLine(commands, previous.x, previous.y, point.x, point.y, red, 2.2);
+  });
+
+  ownPoints.forEach((point, index) => {
+    const quarter = quarters[index];
+    const markerColor = quarter.quarter === bestQuarter ? amber : primary;
+    addDot(commands, point.x, point.y, quarter.quarter === bestQuarter ? 10 : 8, markerColor, [1, 1, 1]);
+    addText(commands, quarter.quarter, point.x - 8, chartBottom + 18, 8.5, [0.36, 0.42, 0.39], "F2");
+  });
+
+  rivalPoints.forEach((point, index) => {
+    const quarter = quarters[index];
+    const markerColor = quarter.quarter === riskQuarter ? amber : red;
+    addDot(commands, point.x, point.y, quarter.quarter === riskQuarter ? 10 : 8, markerColor, [1, 1, 1]);
+  });
+
+  addText(commands, "Propio", x + width - 110, y + 16, 8.5, primary, "F2");
+  addText(commands, "Rival", x + width - 56, y + 16, 8.5, red, "F2");
+}
+
+function zoneInference(zone: string, side: string, threeRate: number) {
+  if (zone === "triple frontal/45" && side === "eje central") {
+    return "La concentracion en frontal/45 con eje central sugiere ventaja creada desde pick central, drag o mano a mano arriba.";
+  }
+  if (zone === "esquina") {
+    return "La carga en esquina sugiere ofensiva que busca colapso, extra-pass y castigo a rotaciones largas.";
+  }
+  if (zone === "pintura") {
+    return "La pintura domina la muestra: hay lectura de primera ventaja, corte fuerte o pick para atacar el aro antes del segundo pase.";
+  }
+  if (threeRate >= 0.45) {
+    return "El volumen exterior indica que vale negar recepcion limpia y cerrar balance antes de ayudar desde el lado fuerte.";
+  }
+  return "La distribucion no depende de una sola zona: el plan debe quitar la primera ventaja y obligar a la segunda decision.";
+}
+
+function buildTeamShotLoadAnalysis(shots: ShotRow[], players: MatchupScout["rivalPlayers"]) {
+  const summary = shotSummary(shots);
+  const playerLoads = players
+    .map((player) => {
+      const playerShots = shots.filter((shot) => sameShotRowForPlayer(player, player.name, shot, players));
+      return {
+        player,
+        attempts: playerShots.length,
+        efficiency: shotSummary(playerShots).efficiency,
+        shots: playerShots
+      };
+    })
+    .filter((entry) => entry.attempts > 0)
+    .sort((entryA, entryB) => entryB.attempts - entryA.attempts);
+  const topThree = playerLoads.slice(0, 3);
+  const topThreeAttempts = topThree.reduce((total, entry) => total + entry.attempts, 0);
+  const restAttempts = Math.max(0, shots.length - topThreeAttempts);
+  const threeRate = summary.threeAttempts / Math.max(summary.attempts, 1);
+  const topNames = topThree.map((entry) => `${entry.player.name} (${entry.attempts})`);
+  return {
+    summary,
+    playerLoads,
+    topThree,
+    topThreeAttempts,
+    restAttempts,
+    shareTopThree: shots.length > 0 ? Math.round((topThreeAttempts / shots.length) * 100) : 0,
+    zoneNarrative: zoneInference(summary.topZone, summary.topSide, threeRate),
+    topNames
+  };
+}
+
+function addPlayerShotMiniCard(
+  commands: string[],
+  focus: {
+    player: MatchupScout["rivalPlayers"][number];
+    shots: ShotRow[];
+    label: string;
+    summary: ReturnType<typeof shotSummary>;
+    analysis: ReturnType<typeof buildShotAnalysis>;
+  },
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  accent: PdfRgb
+) {
+  addShadowRect(commands, x, y - height, width, height, [1, 1, 1], [0.87, 0.88, 0.86]);
+  addRect(commands, x, y - 5, width, 5, accent);
+  addText(commands, focus.player.name, x + 14, y - 24, 12.5, [0.06, 0.08, 0.07], "F2");
+  addText(commands, `${focus.player.role} · ${formatPdfNumber(focus.player.minutes)} MIN/PJ · ${formatPdfNumber(focus.player.points)} PTS/PJ`, x + 14, y - 42, 8.4, [0.36, 0.42, 0.39], "F1");
+  addRect(commands, x + 14, y - 164, 168, 100, [0.96, 0.98, 0.97], [0.82, 0.85, 0.82]);
+  if (focus.shots.length > 0) {
+    addShotCourt(commands, focus.shots, x + 22, y - 156, 152, 84, accent);
+  } else {
+    addWrappedText(commands, "Sin carta confirmada en el ultimo partido.", x + 30, y - 102, 138, 10, [0.36, 0.42, 0.39], "F2", 12, 3);
+  }
+  addMetricCard(commands, "Ultimo partido", focus.label, `${focus.summary.attempts} tiros · ${focus.summary.efficiency}`, x + 198, y - 64, width - 212, 70, accent);
+  addInsightListCard(commands, "Lectura tactica", [focus.analysis.decisions[0], focus.analysis.strengths[0], focus.analysis.defensiveInstructions[0]], x + 198, y - 144, width - 212, 120, accent);
+}
+
+type PlayerDefenseFocus = {
+  player: MatchupScout["rivalPlayers"][number];
+  shots: ShotRow[];
+  label: string;
+  summary: ReturnType<typeof shotSummary>;
+  analysis: ReturnType<typeof buildShotAnalysis>;
+  rank: number;
+  tag: string;
+  source: "titular" | "banca";
+};
+
+function buildPlayerDefenseFocus(model: MatchupScout, shots: ShotRow[] = [], shotGames: GameRow[] = []) {
+  const mainThreat = model.rivalPlayers[0]?.name;
+  const starters = model.rivalRotation.starters.filter((name) => !mainThreat || !sameShotPlayer(name, mainThreat)).slice(0, 4);
+  const bench = model.rivalRotation.firstChanges
+    .filter((name) => !mainThreat || !sameShotPlayer(name, mainThreat))
+    .filter((name) => !starters.some((starter) => sameShotPlayer(starter, name)))
+    .slice(0, 2);
+  const names = uniqueNames([mainThreat, ...starters, ...bench, ...model.rivalPlayers.slice(0, 12).map((player) => player.name)]).slice(0, 7);
+
+  return names
+    .map((name, index) => {
+      const player = model.rivalPlayers.find((item) => sameShotPlayer(item.name, name));
+      if (!player) {
+        return null;
+      }
+      const playerShots = shots.filter((shot) => sameShotRowForPlayer(player, name, shot, model.rivalPlayers));
+      const latest = latestShotGameForPlayer(playerShots, shotGames);
+      const isMainThreat = Boolean(mainThreat && sameShotPlayer(name, mainThreat));
+      const benchIndex = bench.findIndex((item) => sameShotPlayer(item, name));
+      return {
+        player,
+        shots: latest.shots,
+        label: latest.label,
+        summary: shotSummary(latest.shots),
+        analysis: buildShotAnalysis(player.name, latest.shots, player),
+        rank: index + 1,
+        tag: isMainThreat ? "Amenaza principal" : benchIndex === 0 ? "1er cambio" : benchIndex === 1 ? "2do cambio" : "Titular relevante",
+        source: benchIndex >= 0 ? "banca" : "titular"
+      } satisfies PlayerDefenseFocus;
+    })
+    .filter((item): item is PlayerDefenseFocus => Boolean(item));
+}
+
+function quarterVolumeCounts(shots: ShotRow[]) {
+  return [1, 2, 3, 4].map((period) => ({
+    label: `${period}C`,
+    attempts: shots.filter((shot) => shot.period === period).length
+  }));
+}
+
+function addQuarterVolumeStrip(
+  commands: string[],
+  shots: ShotRow[],
+  x: number,
+  y: number,
+  width: number,
+  accent: PdfRgb
+) {
+  const counts = quarterVolumeCounts(shots);
+  const maxAttempts = Math.max(...counts.map((item) => item.attempts), 1);
+  counts.forEach((item, index) => {
+    const colX = x + index * (width / 4);
+    addText(commands, item.label, colX + 6, y + 14, 7.8, [0.36, 0.42, 0.39], "F2");
+    addRect(commands, colX + 4, y, width / 4 - 12, 8, [0.9, 0.93, 0.91]);
+    addRect(commands, colX + 4, y, Math.max(4, ((width / 4 - 12) * item.attempts) / maxAttempts), 8, accent);
+    addText(commands, `${item.attempts}`, colX + width / 4 - 18, y + 14, 7.8, [0.08, 0.09, 0.08], "F2");
+  });
 }
 
 function addComparisonRow(
@@ -1927,11 +2178,39 @@ function addPlayerDossierCard(
   addRect(commands, x, y - 5, width, 5, index === 0 ? [0.88, 0.11, 0.28] : accent);
   addCircle(commands, x + 23, y - 31, 15, index === 0 ? [1, 0.92, 0.94] : [0.9, 0.97, 0.94], [0.84, 0.86, 0.84]);
   addText(commands, `${index + 1}`, x + 16, y - 37, 15, index === 0 ? [0.88, 0.11, 0.28] : accent, "F2");
-  addWrappedText(commands, player.name, x + 42, y - 20, width - 54, 14, [0.06, 0.08, 0.07], "F2", 16, 2);
-  addText(commands, player.role, x + 42, y - 55, 9.5, [0.36, 0.42, 0.39], "F1");
-  addText(commands, `MIN ${formatPdfNumber(player.minutes)}   PTS ${formatPdfNumber(player.points)}   REB ${formatPdfNumber(player.rebounds)}   AST ${formatPdfNumber(player.assists)}`, x + 12, y - 82, 9.5, [0.08, 0.09, 0.08], "F2");
-  addWrappedText(commands, `Plan: ${player.defensiveKey}`, x + 12, y - 108, width - 24, 9.8, [0.22, 0.28, 0.25], "F1", 12, 3);
-  addWrappedText(commands, `Gatillo: ${player.decisionTrigger}`, x + 12, y - height + 30, width - 24, 8.6, [0.36, 0.42, 0.39], "F1", 11, 2);
+  const nameBottom = addWrappedText(commands, player.name, x + 42, y - 20, width - 54, 14, [0.06, 0.08, 0.07], "F2", 16, 2);
+  addText(commands, player.role, x + 42, nameBottom - 6, 9.5, [0.36, 0.42, 0.39], "F1");
+  addText(commands, `MIN ${formatPdfNumber(player.minutes)}   PTS ${formatPdfNumber(player.points)}   REB ${formatPdfNumber(player.rebounds)}   AST ${formatPdfNumber(player.assists)}`, x + 12, nameBottom - 28, 9.3, [0.08, 0.09, 0.08], "F2");
+  addWrappedText(commands, `Plan: ${player.defensiveKey}`, x + 12, y - height + 48, width - 24, 9.4, [0.22, 0.28, 0.25], "F1", 11, 2);
+  addWrappedText(commands, `Gatillo: ${player.decisionTrigger}`, x + 12, y - height + 24, width - 24, 8.4, [0.36, 0.42, 0.39], "F1", 10, 1);
+}
+
+function addInsightListCard(
+  commands: string[],
+  title: string,
+  items: string[],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  accent: PdfRgb,
+  footer?: string
+) {
+  addShadowRect(commands, x, y - height, width, height, [1, 1, 1], [0.87, 0.88, 0.86]);
+  addRect(commands, x, y - 5, width, 5, accent);
+  addText(commands, title.toUpperCase(), x + 12, y - 22, 8.5, accent, "F2");
+  const footerReserve = footer ? 28 : 0;
+  const availableHeight = Math.max(24, height - 52 - footerReserve);
+  const maxVisibleRows = Math.max(1, Math.min(3, Math.floor(availableHeight / 34)));
+  items.slice(0, maxVisibleRows).forEach((item, index) => {
+    const rowY = y - 48 - index * 34;
+    addRect(commands, x + 12, rowY - 16, width - 24, 24, [0.985, 0.989, 0.985], [0.9, 0.92, 0.9]);
+    addRect(commands, x + 12, rowY - 16, 4, 24, accent);
+    addWrappedText(commands, item, x + 24, rowY - 2, width - 40, 9.2, [0.22, 0.28, 0.25], "F1", 11, 2);
+  });
+  if (footer) {
+    addWrappedText(commands, footer, x + 12, y - height + 28, width - 24, 8.5, [0.36, 0.42, 0.39], "F1", 10, 2);
+  }
 }
 
 function addQuarterDossierCard(
@@ -1963,70 +2242,6 @@ function addQuarterDossierCard(
   addBar(commands, x + 58, y - 121, width - 100, Math.abs(quarter.differential), maxDiff, toneColor);
   addText(commands, signedPdfNumber(quarter.differential), x + width - 42, y - 124, 8.5, toneColor, "F2");
   addWrappedText(commands, plan.decision, x + 14, y - 146, width - 28, 8.8, [0.22, 0.28, 0.25], "F1", 11, 4);
-}
-
-function addRecentGameRows(
-  commands: string[],
-  title: string,
-  games: MatchupScout["ownTeam"]["recentGames"],
-  x: number,
-  y: number,
-  width: number,
-  accent: PdfRgb
-) {
-  addShadowRect(commands, x, y - 160, width, 160, [1, 1, 1], [0.86, 0.88, 0.86]);
-  addRect(commands, x, y - 5, width, 5, accent);
-  addText(commands, title, x + 16, y - 28, 11, accent, "F2");
-  const rows = games.slice(0, 5);
-  if (rows.length === 0) {
-    addWrappedText(commands, "Sin partidos confirmados para este filtro. Revisa muestra o sincroniza links oficiales.", x + 16, y - 62, width - 32, 10, [0.36, 0.42, 0.39], "F1", 13, 3);
-    return;
-  }
-  rows.forEach((game, index) => {
-    const rowY = y - 58 - index * 22;
-    const resultColor: PdfRgb = game.result === "G" ? [0.08, 0.58, 0.44] : [0.88, 0.11, 0.28];
-    addRect(commands, x + 16, rowY - 10, 18, 16, game.result === "G" ? [0.86, 0.97, 0.93] : [1, 0.9, 0.92], [0.84, 0.86, 0.84]);
-    addText(commands, game.result, x + 22, rowY - 5, 8, resultColor, "F2");
-    addText(commands, game.score, x + 44, rowY - 5, 9.5, [0.06, 0.08, 0.07], "F2");
-    addWrappedText(commands, `${game.venue === "Local" ? "vs" : "@"} ${game.opponent}`, x + 96, rowY - 2, width - 190, 8.8, [0.22, 0.28, 0.25], "F2", 10, 1);
-    addText(commands, game.venue, x + width - 58, rowY - 5, 8.2, [0.36, 0.42, 0.39], "F1");
-  });
-}
-
-function addThinStat(
-  commands: string[],
-  label: string,
-  ownValue: string,
-  rivalValue: string,
-  x: number,
-  y: number,
-  width: number,
-  primary: PdfRgb
-) {
-  addText(commands, label, x, y, 9, [0.36, 0.42, 0.39], "F2");
-  addText(commands, ownValue, x + width * 0.45, y, 11, primary, "F2");
-  addText(commands, rivalValue, x + width - 44, y, 11, [0.88, 0.11, 0.28], "F2");
-  addLine(commands, x, y - 10, x + width, y - 10, [0.88, 0.9, 0.88], 0.7);
-}
-
-function addPlayerMatrixRow(
-  commands: string[],
-  player: MatchupScout["rivalPlayers"][number],
-  index: number,
-  x: number,
-  y: number,
-  width: number,
-  accent: PdfRgb
-) {
-  addRect(commands, x, y - 35, width, 38, index % 2 === 0 ? [1, 1, 1] : [0.97, 0.98, 0.97], [0.88, 0.9, 0.88]);
-  addCircle(commands, x + 18, y - 15, 10, index === 0 ? [1, 0.9, 0.92] : [0.9, 0.97, 0.94], [0.84, 0.86, 0.84]);
-  addText(commands, String(index + 1), x + 14, y - 19, 9, index === 0 ? [0.88, 0.11, 0.28] : accent, "F2");
-  addWrappedText(commands, player.name, x + 38, y - 8, 150, 9.2, [0.06, 0.08, 0.07], "F2", 10, 1);
-  addText(commands, formatPdfNumber(player.minutes), x + 210, y - 18, 9, [0.06, 0.08, 0.07], "F2");
-  addText(commands, formatPdfNumber(player.points), x + 270, y - 18, 9, [0.06, 0.08, 0.07], "F2");
-  addText(commands, formatPdfNumber(player.rebounds), x + 330, y - 18, 9, [0.06, 0.08, 0.07], "F2");
-  addText(commands, formatPdfNumber(player.assists), x + 390, y - 18, 9, [0.06, 0.08, 0.07], "F2");
-  addWrappedText(commands, player.defensiveKey, x + 450, y - 8, width - 466, 8.4, [0.22, 0.28, 0.25], "F1", 10, 2);
 }
 
 function addThreeColumnInsight(
@@ -2076,7 +2291,7 @@ function buildPdfDocument(pageStreams: string[]) {
   return pdf;
 }
 
-function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
+export function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = [], shotGames: GameRow[] = []) {
   const primary = teamPrimaryColor(model.ownTeam.team.name);
   const dark: PdfRgb = [0.055, 0.075, 0.062];
   const muted: PdfRgb = [0.36, 0.42, 0.39];
@@ -2092,9 +2307,6 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
   const generatedAt = new Date().toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" });
   const maxQuarterPoints = Math.max(...model.quarterModel.flatMap((quarter) => [quarter.pointsFor, quarter.pointsAgainst]), 1);
   const maxQuarterDiff = Math.max(...model.quarterModel.map((quarter) => Math.abs(quarter.differential)), 1);
-  const topThreatShots = topThreat ? shots.filter((shot) => sameShotRowForPlayer(topThreat, topThreat.name, shot, model.rivalPlayers)) : [];
-  const shotFocus = topThreatShots.length > 0 ? topThreatShots : shots;
-  const shotFocusMade = shotFocus.filter((shot) => shot.made).length;
   const radarMetrics = [
     { label: "Ataque", ...pairScores(getPointsForPerGame(own), getPointsForPerGame(rival)) },
     { label: "Defensa", ...pairScores(getPointsAgainstPerGame(own), getPointsAgainstPerGame(rival), true) },
@@ -2103,21 +2315,33 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
     { label: "Diferencial", own: clampPdf(50 + (getPointDifferential(own) - getPointDifferential(rival)) * 4, 10, 90), rival: clampPdf(50 + (getPointDifferential(rival) - getPointDifferential(own)) * 4, 10, 90) },
     { label: "Prediccion", own: model.prediction.ownWinProbability, rival: model.prediction.rivalWinProbability }
   ];
+  const ownRadarMetrics = radarMetrics.map((metric) => ({ label: metric.label, value: metric.own }));
+  const rivalRadarMetrics = radarMetrics.map((metric) => ({ label: metric.label, value: metric.rival }));
   const ownRecent = recentTeamMetrics(model.ownTeam);
   const rivalRecent = recentTeamMetrics(model.rivalTeam);
   const ownSeason = seasonTeamMetrics(own);
   const rivalSeason = seasonTeamMetrics(rival);
+  const latestRivalGames = [...shotGames].sort((gameA, gameB) => gameB.date.localeCompare(gameA.date));
   const firstHalfDiff = model.quarterModel
     .filter((quarter) => quarter.quarter === "1C" || quarter.quarter === "2C")
     .reduce((total, quarter) => total + quarter.differential, 0);
   const secondHalfDiff = model.quarterModel
     .filter((quarter) => quarter.quarter === "3C" || quarter.quarter === "4C")
     .reduce((total, quarter) => total + quarter.differential, 0);
-  const rivalNine = model.rivalPlayers.slice(0, 9);
-  const ownSix = model.ownPlayers.slice(0, 6);
   const sourceCount = Math.max(model.sourceTrace.length, model.ownTeam.recentGames.length + model.rivalTeam.recentGames.length);
-  const shotPct = shotFocus.length > 0 ? Math.round((shotFocusMade / shotFocus.length) * 100) : 0;
-  const shotRead = buildShotAnalysis(topThreat?.name ?? "Jugador rival", shotFocus, topThreat);
+  const featuredShotPlayers = model.rivalPlayers.slice(0, 4).map((player) => {
+    const playerShots = shots.filter((shot) => sameShotRowForPlayer(player, player.name, shot, model.rivalPlayers));
+    const latest = latestShotGameForPlayer(playerShots, latestRivalGames);
+    return {
+      player,
+      shots: latest.shots,
+      label: latest.label,
+      summary: shotSummary(latest.shots),
+      analysis: buildShotAnalysis(player.name, latest.shots, player)
+    };
+  });
+  const shotPages = featuredShotPlayers.slice(0, 3);
+  const totalPages = 12;
   const pages: string[] = [];
 
   const cover: string[] = [];
@@ -2126,12 +2350,12 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
   addRect(cover, 0, 0, 382, 14, primary);
   addRect(cover, 38, 72, 282, 2, primary);
   addText(cover, "DOS SCOUT PRO", 38, 493, 10, [0.96, 0.85, 0.25], "F2");
-  addText(cover, "BRIEFING DE PARTIDO", 38, 462, 11, [0.78, 0.82, 0.78], "F2");
+  addText(cover, "DOSSIER TACTICO", 38, 462, 11, [0.78, 0.82, 0.78], "F2");
   addWrappedText(cover, `${own.name} vs ${rival.name}`, 38, 410, 285, 34, [1, 1, 1], "F2", 36, 3);
   addText(cover, `${dossierLeague.label} · generado ${generatedAt}`, 40, 284, 11, [0.78, 0.82, 0.78], "F1");
   addWrappedText(cover, model.rivalIdentity.summary, 40, 240, 285, 17, [1, 1, 1], "F2", 20, 4);
   addPill(cover, confidencePdf(model.rivalIdentity.evidence, model.rivalIdentity.confidence), 40, 138, [1, 0.96, 0.82], [0.5, 0.32, 0.02], 198);
-  addText(cover, "No es un reporte de numeros. Es una hoja de decisiones para ganar tiempo de staff.", 40, 94, 10, [0.78, 0.82, 0.78], "F1");
+  addText(cover, "Documento curado desde la plataforma: menos ruido, mas decisiones accionables de staff.", 40, 94, 10, [0.78, 0.82, 0.78], "F1");
   addMetricCard(cover, "Record propio", model.ownTeam.recentRecord, `${formatPdfNumber(getPointsForPerGame(own))} PF/PJ · DIF ${signedPdfNumber(getPointDifferential(own))}`, 430, 470, 150, 92, primary);
   addMetricCard(cover, "Record rival", model.rivalTeam.recentRecord, `${formatPdfNumber(getPointsForPerGame(rival))} PF/PJ · DIF ${signedPdfNumber(getPointDifferential(rival))}`, 596, 470, 150, 92, red);
   addMetricCard(cover, "Win prob.", `${model.prediction.ownWinProbability}%`, model.prediction.marginRange, 762, 470, 150, 92, amber);
@@ -2139,48 +2363,30 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
   addMetricCard(cover, "Ventaja propia", topOwn?.name ?? "Sin muestra", topOwn ? `${topOwn.role} · impacto ${formatPdfNumber(topOwn.recentImpactIndex)}` : "Pendiente de datos", 676, 342, 236, 112, primary);
   addMetricCard(cover, "Cuarto de quiebre", bestQuarter?.quarter ?? "s/d", bestQuarter ? `${signedPdfNumber(bestQuarter.differential)} · ${bestQuarter.recommendation}` : "Sin modelo suficiente", 430, 196, 222, 112, amber);
   addMetricCard(cover, "Base estadistica", `${formatPdfNumber(getReboundsPerGame(own))} vs ${formatPdfNumber(getReboundsPerGame(rival))}`, `REB/PJ · AST ${formatPdfNumber(getAssistsPerGame(own))} vs ${formatPdfNumber(getAssistsPerGame(rival))}`, 676, 196, 236, 112, primary);
-  addFooter(cover, "01 / 15", model, primary);
+  addFooter(cover, `01 / ${String(totalPages).padStart(2, "0")}`, model, primary);
   pages.push(cover.join("\n"));
 
   const quick: string[] = [];
-  addHeader(quick, "Si solo tienes 30 segundos", "Lo que el entrenador debe recordar antes de entrar a cancha", "02 / 07", primary);
+  addHeader(quick, "Si solo tienes 30 segundos", "Lo que el entrenador debe recordar antes de entrar a cancha", `02 / ${String(totalPages).padStart(2, "0")}`, primary);
   addRect(quick, 42, 302, 876, 100, dark);
   addText(quick, "PLAN MADRE", 62, 370, 10, [0.96, 0.85, 0.25], "F2");
   addWrappedText(quick, model.decisionBrief[0]?.action ?? "Controlar ritmo, rebote y primera ventaja rival.", 62, 340, 540, 25, [1, 1, 1], "F2", 28, 2);
   addText(quick, `${model.prediction.ownWinProbability}% victoria propia`, 704, 356, 24, [1, 1, 1], "F2");
   addBar(quick, 706, 326, 160, model.prediction.ownWinProbability, 100, primary);
   addText(quick, `Margen esperado ${model.prediction.marginRange}`, 706, 304, 10, [0.78, 0.82, 0.78], "F1");
-  model.decisionBrief.slice(0, 6).forEach((decision, index) => {
-    const col = index % 3;
-    const row = Math.floor(index / 3);
-    const x = 42 + col * 292;
-    const y = 260 - row * 104;
+  model.decisionBrief.slice(0, 4).forEach((decision, index) => {
+    const col = index % 2;
+    const row = Math.floor(index / 2);
+    const x = 42 + col * 438;
+    const y = 252 - row * 112;
     const tone: PdfRgb = decision.tone === "risk" ? red : decision.tone === "advantage" ? primary : amber;
-    addMetricCard(quick, decision.label, decision.value, decision.action, x, y, 268, 86, tone);
+    addMetricCard(quick, decision.label, decision.value, decision.action, x, y, 416, 94, tone);
   });
-  addFooter(quick, "02 / 15", model, primary);
+  addFooter(quick, `02 / ${String(totalPages).padStart(2, "0")}`, model, primary);
   pages.push(quick.join("\n"));
 
-  const radar: string[] = [];
-  addHeader(radar, "Radar comparativo", "Forma reciente vs base de temporada para decidir donde cargar el partido", "03 / 07", primary);
-  addRect(radar, 42, 66, 412, 350, [1, 1, 1], [0.86, 0.88, 0.86]);
-  addSectionKicker(radar, "Lectura visual", 66, 386, primary);
-  addRadarChart(radar, radarMetrics, 116, 116, 132, primary);
-  addRect(radar, 494, 66, 424, 350, [1, 1, 1], [0.86, 0.88, 0.86]);
-  addSectionKicker(radar, "Ventajas / riesgos", 520, 386, primary);
-  addComparisonRow(radar, "PTS/PJ", getPointsForPerGame(own), getPointsForPerGame(rival), 520, 338, 360, primary);
-  addComparisonRow(radar, "PC/PJ", getPointsAgainstPerGame(own), getPointsAgainstPerGame(rival), 520, 296, 360, primary, true);
-  addComparisonRow(radar, "REB/PJ", getReboundsPerGame(own), getReboundsPerGame(rival), 520, 254, 360, primary);
-  addComparisonRow(radar, "AST/PJ", getAssistsPerGame(own), getAssistsPerGame(rival), 520, 212, 360, primary);
-  addComparisonRow(radar, "DIF", getPointDifferential(own), getPointDifferential(rival), 520, 170, 360, primary);
-  addRect(radar, 520, 92, 360, 48, [1, 0.96, 0.9], [0.92, 0.82, 0.62]);
-  addText(radar, "Decision", 534, 120, 9, [0.5, 0.32, 0.02], "F2");
-  addWrappedText(radar, model.comparison[0]?.value ?? "Cargar el partido donde exista mayor margen colectivo.", 610, 122, 250, 9.5, [0.22, 0.28, 0.25], "F1", 12, 2);
-  addFooter(radar, "03 / 15", model, primary);
-  pages.push(radar.join("\n"));
-
   const identity: string[] = [];
-  addHeader(identity, "Identidad rival y rotacion", "Como juega, de quien depende y con quien probablemente cierra", "04 / 07", primary);
+  addHeader(identity, "Identidad rival", "Como juega, de que depende y desde donde hay que sacarlo", `03 / ${String(totalPages).padStart(2, "0")}`, primary);
   addRect(identity, 42, 270, 402, 146, dark);
   addText(identity, "IDENTIDAD RIVAL", 62, 386, 9, [0.96, 0.85, 0.25], "F2");
   addWrappedText(identity, model.rivalIdentity.summary, 62, 354, 330, 22, [1, 1, 1], "F2", 25, 3);
@@ -2189,201 +2395,658 @@ function buildTacticalDossierPdf(model: MatchupScout, shots: ShotRow[] = []) {
   addMetricCard(identity, "Defensa", model.rivalIdentity.defensiveStyle, model.rivalIdentity.clutchBehavior, 704, 416, 204, 112, red);
   addMetricCard(identity, "Dependencia", model.rivalIdentity.playerDependency, "Top 3 ofensivo y volumen de tiro", 472, 270, 204, 112, amber);
   addMetricCard(identity, "Clutch", model.rivalIdentity.clutchBehavior, "Revisar cierres con video", 704, 270, 204, 112, primary);
-  addRotationList(identity, "Quinteto probable", model.rivalRotation.starters, 42, 194, 280, red);
-  addRotationList(identity, "Primeros cambios", model.rivalRotation.firstChanges, 342, 194, 280, amber);
-  addRotationList(identity, "Cierre bajo presion", model.rivalRotation.closers, 642, 194, 276, primary);
-  addFooter(identity, "04 / 15", model, primary);
+  addInsightListCard(identity, "Como bajarlo", [
+    model.comparison[1]?.value ?? "Quitar primera ventaja y bajar ritmo.",
+    model.tacticalKeysCore[0]?.action ?? "Subir fisico sobre la primera amenaza.",
+    model.rivalIdentity.clutchBehavior
+  ], 42, 194, 280, 108, red, "Lectura de staff para el primer timeout.");
+  addInsightListCard(identity, "Donde depende", [
+    model.rivalIdentity.playerDependency,
+    topThreat ? `${topThreat.name} · ${formatPdfNumber(topThreat.points)} PTS/PJ · ${formatPdfNumber(topThreat.minutes)} MIN/PJ` : "Sin amenaza principal confirmada.",
+    model.rivalIdentity.offensiveStyle
+  ], 342, 194, 280, 108, amber, "Cargar ayudas segun top 3 ofensivo.");
+  addInsightListCard(identity, "Que no regalar", [
+    model.rivalIdentity.defensiveStyle,
+    model.comparison[2]?.value ?? "No perder rebote ni balance defensivo.",
+    model.decisionBrief[1]?.action ?? "Sacar de ritmo sus primeras dos posesiones."
+  ], 642, 194, 276, 108, primary, "Si entra comodo al ritmo, sube su produccion.");
+  addFooter(identity, `03 / ${String(totalPages).padStart(2, "0")}`, model, primary);
   pages.push(identity.join("\n"));
 
   const players: string[] = [];
-  addHeader(players, "Plan defensivo por jugador", "Prioridad: amenaza principal, titulares y primeros cambios", "05 / 07", primary);
-  model.rivalPlayers.slice(0, 6).forEach((player, index) => {
-    const col = index % 3;
-    const row = Math.floor(index / 3);
-    addPlayerDossierCard(players, player, index, 42 + col * 300, 396 - row * 176, 276, 152, primary);
+  addHeader(players, "Jugadores clave", "Amenaza principal, titulares de carga y primer ajuste de banca", `04 / ${String(totalPages).padStart(2, "0")}`, primary);
+  model.rivalPlayers.slice(0, 4).forEach((player, index) => {
+    const col = index % 2;
+    const row = Math.floor(index / 2);
+    addPlayerDossierCard(players, player, index, 42 + col * 438, 396 - row * 154, 416, 132, primary);
   });
-  addRect(players, 42, 42, 876, 44, [1, 0.96, 0.9], [0.92, 0.82, 0.62]);
-  addText(players, "Regla staff", 58, 66, 9, [0.5, 0.32, 0.02], "F2");
-  addWrappedText(players, `Si ${topThreat?.name ?? "la amenaza principal"} supera su umbral, cambiar cobertura antes de que entre en ritmo. No esperar timeout para ajustar.`, 150, 67, 720, 9.5, [0.22, 0.28, 0.25], "F1", 12, 2);
-  addFooter(players, "05 / 15", model, primary);
+  addInsightListCard(players, "Regla staff", [
+    `Si ${topThreat?.name ?? "la amenaza principal"} supera su umbral, cambiar cobertura antes de que entre en ritmo.`,
+    model.tacticalKeysCore[0]?.trigger ?? "No esperar timeout para ajustar la primera ventaja.",
+    model.comparison[0]?.value ?? "Cargar el partido donde exista mayor margen colectivo."
+  ], 42, 86, 876, 88, amber);
+  addFooter(players, `04 / ${String(totalPages).padStart(2, "0")}`, model, primary);
   pages.push(players.join("\n"));
 
-  const shotPage: string[] = [];
-  addHeader(shotPage, "Lectura de jugadores desde carta de tiro", "Mapa + interpretacion: que busca, que evita y como defenderlo", "06 / 07", primary);
-  addRect(shotPage, 42, 72, 520, 322, [1, 1, 1], [0.86, 0.88, 0.86]);
-  addSectionKicker(shotPage, "Mapa rival", 66, 364, primary);
-  if (shots.length > 0) {
-    addShotCourt(shotPage, shotFocus, 78, 112, 448, 214, primary);
-    addText(shotPage, "Convertido", 78, 90, 8.5, primary, "F2");
-    addText(shotPage, "Fallado", 158, 90, 8.5, red, "F2");
-  } else {
-    addRect(shotPage, 78, 112, 448, 214, [0.96, 0.98, 0.97], [0.78, 0.82, 0.79]);
-    addWrappedText(shotPage, "Carta de tiro pendiente. Reimporta los links de Estadisticas completas para persistir coordenadas y zonas de lanzamiento.", 110, 230, 380, 17, [0.36, 0.42, 0.39], "F2", 20, 4);
-  }
-  addMetricCard(shotPage, "Jugador foco", topThreat?.name ?? "s/d", topThreat ? `${formatPdfNumber(topThreat.points)} PTS/PJ · ${formatPdfNumber(topThreat.minutes)} MIN/PJ` : "Sin muestra", 594, 394, 300, 82, red);
-  addMetricCard(shotPage, "Perfil", shotRead.profile, shotRead.headline, 594, 294, 300, 82, primary);
-  addMetricCard(shotPage, "Tiros muestra", String(shotFocus.length), shots.length > 0 ? `${shotFocusMade}/${shotFocus.length} convertidos (${shotPct}%) en el foco visual` : "Sin coordenadas confirmadas", 594, 194, 300, 82, amber);
-  addRect(shotPage, 594, 72, 300, 92, [1, 0.96, 0.9], [0.92, 0.82, 0.62]);
-  addText(shotPage, "REGLAS DEFENSIVAS", 612, 136, 8.5, [0.5, 0.32, 0.02], "F2");
-  addWrappedText(shotPage, shotRead.defensiveInstructions.slice(0, 2).join(" "), 612, 116, 248, 8.8, [0.22, 0.28, 0.25], "F1", 11, 3);
-  addText(shotPage, "Debilidad", 612, 86, 8.5, red, "F2");
-  addWrappedText(shotPage, shotRead.weaknesses[0] ?? "Sacar de su zona fuerte y validar con video.", 684, 86, 190, 8.8, [0.22, 0.28, 0.25], "F1", 11, 2);
-  addFooter(shotPage, "06 / 15", model, primary);
-  pages.push(shotPage.join("\n"));
-
-  const quarters: string[] = [];
-  addHeader(quarters, "Momentum por cuartos y cierre", "Plan operativo para charla tecnica y ajustes en vivo", "07 / 07", primary);
-  model.quarterModel.forEach((quarter, index) => {
-    addQuarterDossierCard(quarters, quarter, 42 + index * 223, 408, 204, 182, maxQuarterPoints, maxQuarterDiff, primary, bestQuarter?.quarter, riskQuarter?.quarter);
+  shotPages.forEach((focus, index) => {
+    const shotPage: string[] = [];
+    const shotPageNumber = 5 + index;
+    addHeader(
+      shotPage,
+      "Lectura rival desde ultima carta de tiro",
+      `${focus.player.name} · ${focus.player.role} · ${focus.label}`,
+      `${String(shotPageNumber).padStart(2, "0")} / ${String(totalPages).padStart(2, "0")}`,
+      primary
+    );
+    addRect(shotPage, 42, 180, 470, 206, [1, 1, 1], [0.86, 0.88, 0.86]);
+    addSectionKicker(shotPage, index === 0 ? "Amenaza 1" : index === 1 ? "Amenaza 2" : "Amenaza 3", 66, 364, index === 0 ? red : primary);
+    if (focus.shots.length > 0) {
+      addShotCourt(shotPage, focus.shots, 76, 214, 394, 132, primary);
+      addText(shotPage, "Convertido", 76, 190, 8.5, primary, "F2");
+      addText(shotPage, "Fallado", 156, 190, 8.5, red, "F2");
+    } else {
+      addRect(shotPage, 76, 214, 394, 132, [0.96, 0.98, 0.97], [0.78, 0.82, 0.79]);
+      addWrappedText(shotPage, "Sin carta de tiro confirmada en el ultimo partido. Reimporta Estadisticas completas para sostener la lectura espacial.", 108, 286, 328, 15, [0.36, 0.42, 0.39], "F2", 18, 3);
+    }
+    addMetricCard(shotPage, "Jugador foco", focus.player.name, `${formatPdfNumber(focus.player.minutes)} MIN/PJ · ${formatPdfNumber(focus.player.points)} PTS/PJ`, 544, 334, 350, 70, index === 0 ? red : primary);
+    addMetricCard(shotPage, "Perfil", focus.analysis.profile, focus.analysis.style, 544, 252, 350, 70, primary);
+    addMetricCard(
+      shotPage,
+      "Ultimo partido",
+      `${focus.summary.attempts} tiros · ${focus.summary.efficiency}`,
+      focus.summary.attempts > 0
+        ? `${focus.summary.topZone} · ${focus.summary.topQuarter} · ${focus.summary.threeMade}/${focus.summary.threeAttempts} en triples`
+        : "Sin coordenadas confirmadas para este foco",
+      544,
+      170,
+      350,
+      70,
+      amber
+    );
+    addInsightListCard(
+      shotPage,
+      "Plan defensivo",
+      focus.analysis.defensiveInstructions,
+      42,
+      168,
+      852,
+      58,
+      amber,
+      "Regla simple para staff: comunicar esta consigna antes de la primera cobertura."
+    );
+    addInsightListCard(shotPage, "Decisiones tipicas", focus.analysis.decisions, 42, 98, 274, 42, primary);
+    addInsightListCard(shotPage, "Fortalezas reales", focus.analysis.strengths, 330, 98, 274, 42, primary);
+    addInsightListCard(shotPage, "Debilidades explotables", focus.analysis.weaknesses, 618, 98, 276, 42, red);
+    addFooter(shotPage, `${String(shotPageNumber).padStart(2, "0")} / ${String(totalPages).padStart(2, "0")}`, model, primary);
+    pages.push(shotPage.join("\n"));
   });
-  addText(quarters, "Claves del partido", 42, 186, 18, dark, "F2");
+
+  const rotationPage: string[] = [];
+  addHeader(rotationPage, "Rotacion rival", "Quien inicia, quien cambia el ritmo y quien probablemente cierra", `08 / ${String(totalPages).padStart(2, "0")}`, primary);
+  addRect(rotationPage, 42, 300, 876, 110, [1, 0.95, 0.94], [0.92, 0.76, 0.76]);
+  addText(rotationPage, "LECTURA DEFENSIVA", 62, 382, 9, red, "F2");
+  addWrappedText(rotationPage, `La prioridad es sacar de ritmo a ${topThreat?.name ?? "la primera amenaza"} y no regalar confianza a la segunda unidad.`, 62, 350, 560, 22, dark, "F2", 25, 3);
+  addText(rotationPage, `${model.rivalRotation.lineupStability} · ${model.rivalRotation.benchDependency}`, 650, 362, 10, muted, "F1");
+  addRotationList(rotationPage, "Quinteto rival", model.rivalRotation.starters, 42, 252, 280, red);
+  addRotationList(rotationPage, "Primeros cambios", model.rivalRotation.firstChanges, 342, 252, 280, amber);
+  addRotationList(rotationPage, "Cierre rival", model.rivalRotation.closers, 642, 252, 276, red);
+  addThreeColumnInsight(rotationPage, "Banco rival", model.rivalRotation.benchDependency, model.rivalRotation.benchImpact, 42, 126, 270, red);
+  addThreeColumnInsight(rotationPage, "Clutch", model.rivalRotation.pressureClosers, "No cambiar automatico si el rival busca aislar al scorer. Comunicar cobertura antes de cada bloqueo.", 344, 126, 270, amber);
+  addThreeColumnInsight(rotationPage, "Confianza", `${Math.round(model.rivalRotation.confidence * 100)}%`, model.rivalRotation.rule, 646, 126, 272, red);
+  addFooter(rotationPage, `08 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(rotationPage.join("\n"));
+
+  const quarterPage: string[] = [];
+  addHeader(quarterPage, "Cuartos y momentum", "Donde atacar, donde resistir y como sostener el cierre", `09 / ${String(totalPages).padStart(2, "0")}`, primary);
+  model.quarterModel.forEach((quarter, index) => {
+    addQuarterDossierCard(quarterPage, quarter, 42 + index * 223, 408, 204, 182, maxQuarterPoints, maxQuarterDiff, primary, bestQuarter?.quarter, riskQuarter?.quarter);
+  });
+  addText(quarterPage, "Claves del partido", 42, 186, 18, dark, "F2");
   model.tacticalKeysCore.slice(0, 3).forEach((key, index) => {
     const x = 42 + index * 292;
-    addRect(quarters, x, 50, 266, 112, [1, 1, 1], [0.87, 0.88, 0.86]);
-    addRect(quarters, x, 156, 266, 6, index === 0 ? primary : index === 1 ? amber : red);
-    addText(quarters, `Clave ${index + 1}`, x + 14, 136, 9, index === 2 ? red : primary, "F2");
-    addWrappedText(quarters, key.title, x + 14, 116, 238, 12, dark, "F2", 14, 2);
-    addWrappedText(quarters, key.action, x + 14, 82, 238, 9.5, [0.22, 0.28, 0.25], "F1", 12, 3);
+    addRect(quarterPage, x, 50, 266, 112, [1, 1, 1], [0.87, 0.88, 0.86]);
+    addRect(quarterPage, x, 156, 266, 6, index === 0 ? primary : index === 1 ? amber : red);
+    addText(quarterPage, `Clave ${index + 1}`, x + 14, 136, 9, index === 2 ? red : primary, "F2");
+    addWrappedText(quarterPage, key.title, x + 14, 116, 238, 12, dark, "F2", 14, 2);
+    addWrappedText(quarterPage, key.action, x + 14, 82, 238, 9.5, [0.22, 0.28, 0.25], "F1", 12, 3);
   });
-  addText(quarters, `Atacar: ${bestQuarter?.quarter ?? "s/d"} · Resistir: ${riskQuarter?.quarter ?? "s/d"} · 1T ${signedPdfNumber(firstHalfDiff)} / 2T ${signedPdfNumber(secondHalfDiff)} · Validar con video.`, 42, 34, 9, muted, "F1");
-  addFooter(quarters, "07 / 15", model, primary);
-  pages.push(quarters.join("\n"));
+  addText(quarterPage, `Atacar: ${bestQuarter?.quarter ?? "s/d"} · Resistir: ${riskQuarter?.quarter ?? "s/d"} · 1T ${signedPdfNumber(firstHalfDiff)} / 2T ${signedPdfNumber(secondHalfDiff)} · Validar con video.`, 42, 34, 9, muted, "F1");
+  addFooter(quarterPage, `09 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(quarterPage.join("\n"));
 
-  const formPage: string[] = [];
-  addHeader(formPage, "Forma reciente", "Ultimos partidos para separar tendencia real de ruido de muestra", "08 / 15", primary);
-  addRecentGameRows(formPage, `Ultimos juegos · ${own.name}`, model.ownTeam.recentGames, 42, 400, 410, primary);
-  addRecentGameRows(formPage, `Ultimos juegos · ${rival.name}`, model.rivalTeam.recentGames, 508, 400, 410, red);
-  addThreeColumnInsight(formPage, "Impulso propio", `${formatPdfNumber(ownRecent.points)} pts`, `Diferencial reciente ${signedPdfNumber(ownRecent.differential)}. Si esta cifra supera la base, sostener ritmo sin caer en tiros rapidos de baja calidad.`, 42, 190, 270, primary);
-  addThreeColumnInsight(formPage, "Impulso rival", `${formatPdfNumber(rivalRecent.points)} pts`, `Diferencial reciente ${signedPdfNumber(rivalRecent.differential)}. Preparar primer ajuste si el rival anota temprano desde su primera ventaja.`, 344, 190, 270, red);
-  addThreeColumnInsight(formPage, "Decision de muestra", `${model.ownTeam.sampleRecord} vs ${model.rivalTeam.sampleRecord}`, "Usar la muestra para el plan inicial, pero contrastar con base temporada antes de tomar riesgos defensivos extremos.", 646, 190, 272, amber);
-  addFooter(formPage, "08 / 15", model, primary);
-  pages.push(formPage.join("\n"));
+  const comparisonPage: string[] = [];
+  addHeader(comparisonPage, "Comparativo y base", "Forma reciente vs base de temporada para decidir donde cargar el partido", `10 / ${String(totalPages).padStart(2, "0")}`, primary);
+  addRect(comparisonPage, 42, 154, 412, 262, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(comparisonPage, "Radar propio", 66, 386, primary);
+  addSingleRadarChart(comparisonPage, ownRadarMetrics, 112, 196, 98, primary, own.name);
+  addRect(comparisonPage, 506, 154, 412, 262, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(comparisonPage, "Radar rival", 530, 386, red);
+  addSingleRadarChart(comparisonPage, rivalRadarMetrics, 576, 196, 98, red, rival.name);
+  addRect(comparisonPage, 42, 72, 412, 66, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(comparisonPage, "Forma propia", 66, 116, primary);
+  addWrappedText(comparisonPage, `Muestra ${model.ownTeam.sampleRecord}. Base ${formatPdfNumber(ownSeason.points)} PTS/PJ · diferencial ${signedPdfNumber(ownSeason.differential)}.`, 66, 90, 360, 10.2, [0.22, 0.28, 0.25], "F1", 12, 2);
+  addRect(comparisonPage, 506, 72, 412, 66, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(comparisonPage, "Forma rival", 530, 116, red);
+  addWrappedText(comparisonPage, `Muestra ${model.rivalTeam.sampleRecord}. Base ${formatPdfNumber(rivalSeason.points)} PTS/PJ · diferencial ${signedPdfNumber(rivalSeason.differential)}.`, 530, 90, 360, 10.2, [0.22, 0.28, 0.25], "F1", 12, 2);
+  addRect(comparisonPage, 42, 14, 420, 42, [1, 0.96, 0.9], [0.92, 0.82, 0.62]);
+  addText(comparisonPage, "Decision", 60, 38, 9, [0.5, 0.32, 0.02], "F2");
+  addWrappedText(comparisonPage, model.comparison[0]?.value ?? "Cargar el partido donde exista mayor margen colectivo.", 132, 40, 302, 9.4, [0.22, 0.28, 0.25], "F1", 11, 2);
+  addRect(comparisonPage, 506, 14, 412, 42, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addText(comparisonPage, "Lectura staff", 530, 38, 9, amber, "F2");
+  addWrappedText(comparisonPage, ownRecent.points - ownSeason.points >= rivalRecent.points - rivalSeason.points ? "La forma propia esta por sobre la base: abrir agresivo, pero proteger seleccion de tiro y rebote." : "El rival llega con mejor impulso relativo: bajar posesiones faciles y forzar ejecuciones largas desde el inicio.", 620, 40, 268, 9.2, [0.22, 0.28, 0.25], "F1", 11, 2);
+  addFooter(comparisonPage, `10 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(comparisonPage.join("\n"));
 
-  const basePage: string[] = [];
-  addHeader(basePage, "Base temporada", "Respaldo estadistico para no sobrerreaccionar a un solo partido", "09 / 15", primary);
-  addShadowRect(basePage, 42, 84, 876, 320, [1, 1, 1], [0.86, 0.88, 0.86]);
-  addSectionKicker(basePage, "Forma reciente vs base", 66, 372, primary);
-  addText(basePage, own.name, 270, 372, 10, primary, "F2");
-  addText(basePage, rival.name, 780, 372, 10, red, "F2");
-  addThinStat(basePage, "PTS/PJ temporada", formatPdfNumber(ownSeason.points), formatPdfNumber(rivalSeason.points), 80, 326, 790, primary);
-  addThinStat(basePage, "PTS/PJ muestra", formatPdfNumber(ownRecent.points), formatPdfNumber(rivalRecent.points), 80, 286, 790, primary);
-  addThinStat(basePage, "REB/PJ temporada", formatPdfNumber(ownSeason.rebounds), formatPdfNumber(rivalSeason.rebounds), 80, 246, 790, primary);
-  addThinStat(basePage, "AST/PJ temporada", formatPdfNumber(ownSeason.assists), formatPdfNumber(rivalSeason.assists), 80, 206, 790, primary);
-  addThinStat(basePage, "DIF/PJ temporada", signedPdfNumber(ownSeason.differential), signedPdfNumber(rivalSeason.differential), 80, 166, 790, primary);
-  addRect(basePage, 80, 102, 790, 38, [0.055, 0.075, 0.062], [0.055, 0.075, 0.062]);
-  addText(basePage, "Lectura staff", 98, 124, 9, [0.96, 0.85, 0.25], "F2");
-  addWrappedText(basePage, ownRecent.points - ownSeason.points >= rivalRecent.points - rivalSeason.points ? "La forma propia esta por sobre la base. El plan puede comenzar agresivo, pero debe proteger seleccion de tiro y rebote." : "El rival llega con mejor impulso relativo. Conviene bajar posesiones faciles y forzar ejecuciones largas desde el inicio.", 190, 124, 620, 9.5, [1, 1, 1], "F1", 12, 2);
-  addFooter(basePage, "09 / 15", model, primary);
-  pages.push(basePage.join("\n"));
-
-  const ownRotationPage: string[] = [];
-  addHeader(ownRotationPage, "Rotacion propia", "Como cargar nuestra ventaja sin perder estabilidad de banca", "10 / 15", primary);
-  addRect(ownRotationPage, 42, 300, 876, 110, dark);
-  addText(ownRotationPage, "IDENTIDAD PROPIA", 62, 382, 9, [0.96, 0.85, 0.25], "F2");
-  addWrappedText(ownRotationPage, model.ownIdentity.summary, 62, 352, 540, 22, [1, 1, 1], "F2", 25, 3);
-  addText(ownRotationPage, `Ritmo: ${model.ownIdentity.rhythm} · ${model.ownRotation.lineupStability}`, 644, 362, 10, [0.78, 0.82, 0.78], "F1");
-  addRotationList(ownRotationPage, "Quinteto propio", model.ownRotation.starters, 42, 252, 280, primary);
-  addRotationList(ownRotationPage, "Primeros cambios", model.ownRotation.firstChanges, 342, 252, 280, amber);
-  addRotationList(ownRotationPage, "Cierre probable", model.ownRotation.closers, 642, 252, 276, primary);
-  addThreeColumnInsight(ownRotationPage, "Banco", model.ownRotation.benchDependency, model.ownRotation.benchImpact, 42, 126, 270, primary);
-  addThreeColumnInsight(ownRotationPage, "Presion", model.ownRotation.pressureClosers, "Mantener al menos una fuente estable de ventaja en cancha durante cierres largos.", 344, 126, 270, amber);
-  addThreeColumnInsight(ownRotationPage, "Regla", `${Math.round(model.ownRotation.confidence * 100)}% confianza`, model.ownRotation.rule, 646, 126, 272, primary);
-  addFooter(ownRotationPage, "10 / 15", model, primary);
-  pages.push(ownRotationPage.join("\n"));
-
-  const rivalRotationPage: string[] = [];
-  addHeader(rivalRotationPage, "Rotacion rival ampliada", "Quien inicia, quien cambia el ritmo y quien probablemente cierra", "11 / 15", primary);
-  addRect(rivalRotationPage, 42, 300, 876, 110, [1, 0.95, 0.94], [0.92, 0.76, 0.76]);
-  addText(rivalRotationPage, "LECTURA DEFENSIVA", 62, 382, 9, red, "F2");
-  addWrappedText(rivalRotationPage, `La prioridad es sacar de ritmo a ${topThreat?.name ?? "la primera amenaza"} y no regalar confianza a la segunda unidad.`, 62, 350, 560, 22, dark, "F2", 25, 3);
-  addText(rivalRotationPage, `${model.rivalRotation.lineupStability} · ${model.rivalRotation.benchDependency}`, 650, 362, 10, muted, "F1");
-  addRotationList(rivalRotationPage, "Quinteto rival", model.rivalRotation.starters, 42, 252, 280, red);
-  addRotationList(rivalRotationPage, "Primeros cambios", model.rivalRotation.firstChanges, 342, 252, 280, amber);
-  addRotationList(rivalRotationPage, "Cierre rival", model.rivalRotation.closers, 642, 252, 276, red);
-  addThreeColumnInsight(rivalRotationPage, "Banco rival", model.rivalRotation.benchDependency, model.rivalRotation.benchImpact, 42, 126, 270, red);
-  addThreeColumnInsight(rivalRotationPage, "Clutch", model.rivalRotation.pressureClosers, "No cambiar automatico si el rival busca aislar al scorer. Comunicar cobertura antes de cada bloqueo.", 344, 126, 270, amber);
-  addThreeColumnInsight(rivalRotationPage, "Confianza", `${Math.round(model.rivalRotation.confidence * 100)}%`, model.rivalRotation.rule, 646, 126, 272, red);
-  addFooter(rivalRotationPage, "11 / 15", model, primary);
-  pages.push(rivalRotationPage.join("\n"));
-
-  const rivalMatrix: string[] = [];
-  addHeader(rivalMatrix, "Matriz defensiva de 9 jugadores", "Plan individual para amenaza principal, titulares y rotacion", "12 / 15", primary);
-  addShadowRect(rivalMatrix, 42, 66, 876, 350, [1, 1, 1], [0.86, 0.88, 0.86]);
-  addText(rivalMatrix, "Jugador", 80, 382, 9, muted, "F2");
-  addText(rivalMatrix, "MIN", 252, 382, 9, muted, "F2");
-  addText(rivalMatrix, "PTS", 312, 382, 9, muted, "F2");
-  addText(rivalMatrix, "REB", 372, 382, 9, muted, "F2");
-  addText(rivalMatrix, "AST", 432, 382, 9, muted, "F2");
-  addText(rivalMatrix, "Plan defensivo", 492, 382, 9, muted, "F2");
-  rivalNine.forEach((player, index) => {
-    addPlayerMatrixRow(rivalMatrix, player, index, 66, 354 - index * 34, 820, primary);
-  });
-  addFooter(rivalMatrix, "12 / 15", model, primary);
-  pages.push(rivalMatrix.join("\n"));
-
-  const ownAdvantagePage: string[] = [];
-  addHeader(ownAdvantagePage, "Ventajas propias para cargar", "Quien debe recibir ventajas, como y con que gatillo", "13 / 15", primary);
-  ownSix.slice(0, 6).forEach((player, index) => {
-    const col = index % 3;
-    const row = Math.floor(index / 3);
-    const x = 42 + col * 300;
-    const y = 390 - row * 170;
-    addPlayerDossierCard(ownAdvantagePage, player, index, x, y, 276, 146, primary);
-  });
-  addRect(ownAdvantagePage, 42, 46, 876, 50, [0.055, 0.075, 0.062], [0.055, 0.075, 0.062]);
-  addText(ownAdvantagePage, "Regla ofensiva", 58, 70, 9, [0.96, 0.85, 0.25], "F2");
-  addWrappedText(ownAdvantagePage, `La primera presion debe venir desde ${topOwn?.name ?? "nuestro jugador de mayor impacto"}. Si el rival cambia matchup, repetir el emparejamiento debil en las siguientes dos posesiones.`, 160, 71, 690, 9.5, [1, 1, 1], "F1", 12, 2);
-  addFooter(ownAdvantagePage, "13 / 15", model, primary);
-  pages.push(ownAdvantagePage.join("\n"));
-
-  const validationPage: string[] = [];
-  addHeader(validationPage, "Validacion postpartido", "Lo proyectado vs lo real para vender aprendizaje, no solo prediccion", "14 / 15", primary);
-  addRect(validationPage, 42, 346, 876, 64, model.planValidation.headline.toLowerCase().includes("fuera") ? [1, 0.94, 0.94] : [0.9, 0.97, 0.94], [0.86, 0.88, 0.86]);
-  addText(validationPage, "VALIDACION DEL PLAN", 62, 384, 9, model.planValidation.headline.toLowerCase().includes("fuera") ? red : primary, "F2");
-  addWrappedText(validationPage, model.planValidation.headline, 62, 360, 760, 18, dark, "F2", 22, 2);
-  model.planValidation.checks.slice(0, 4).forEach((check, index) => {
-    const y = 304 - index * 54;
-    const statusColor: PdfRgb = check.status === "logrado" ? primary : check.status === "fallo" ? red : amber;
-    addShadowRect(validationPage, 42, y - 34, 876, 42, [1, 1, 1], [0.88, 0.9, 0.88]);
-    addText(validationPage, check.label, 62, y - 8, 9.5, dark, "F2");
-    addText(validationPage, `${check.projected} -> ${check.actual}`, 252, y - 8, 9.5, muted, "F1");
-    addText(validationPage, check.status.toUpperCase(), 520, y - 8, 9, statusColor, "F2");
-    addWrappedText(validationPage, check.decision, 640, y - 4, 230, 8.5, [0.22, 0.28, 0.25], "F1", 10, 2);
-  });
-  addRect(validationPage, 42, 44, 876, 38, [1, 0.96, 0.9], [0.92, 0.82, 0.62]);
-  addText(validationPage, "Trazabilidad", 60, 66, 9, [0.5, 0.32, 0.02], "F2");
-  addText(validationPage, `${sourceCount} fuentes / registros considerados · dato confirmado, inferencia y conclusion tactica separados`, 150, 66, 9, [0.22, 0.28, 0.25], "F1");
-  addFooter(validationPage, "14 / 15", model, primary);
-  pages.push(validationPage.join("\n"));
-
-  const benchPage: string[] = [];
-  addRect(benchPage, 0, 0, 960, 540, dark);
-  addRect(benchPage, 0, 0, 960, 18, primary);
-  addText(benchPage, "HOJA FINAL DE EJECUCION", 46, 486, 11, [0.96, 0.85, 0.25], "F2");
-  addWrappedText(benchPage, `${own.name} vs ${rival.name}`, 46, 444, 520, 34, [1, 1, 1], "F2", 38, 2);
-  addText(benchPage, "Que debe quedar en la pizarra antes del salto inicial", 48, 386, 12, [0.78, 0.82, 0.78], "F1");
+  const planPage: string[] = [];
+  addHeader(planPage, "Plan final de staff", "Lo que debe quedar claro antes del salto inicial", `11 / ${String(totalPages).padStart(2, "0")}`, primary);
+  addRect(planPage, 42, 316, 876, 96, dark);
+  addText(planPage, "PLAN DEL PARTIDO", 62, 382, 9, [0.96, 0.85, 0.25], "F2");
+  addWrappedText(planPage, model.decisionBrief[0]?.action ?? "Controlar ritmo, rebote y primera ventaja rival.", 62, 350, 500, 20, [1, 1, 1], "F2", 22, 3);
+  addText(planPage, `${model.prediction.ownWinProbability}% victoria propia`, 696, 358, 22, [1, 1, 1], "F2");
+  addBar(planPage, 696, 332, 156, model.prediction.ownWinProbability, 100, primary);
+  addText(planPage, `Margen esperado ${model.prediction.marginRange}`, 696, 312, 9.5, [0.78, 0.82, 0.78], "F1");
   [
     { title: "1. Primer ajuste", value: model.tacticalKeysCore[0]?.action ?? "Sacar de ritmo a la primera ventaja rival." },
     { title: "2. Ventaja propia", value: model.tacticalKeysCore[1]?.action ?? "Cargar nuestra primera fuente de ventaja." },
     { title: "3. Posesiones", value: model.tacticalKeysCore[2]?.action ?? "Controlar rebote y perdida antes de acelerar." },
-    { title: "4. Cuarto de quiebre", value: `${bestQuarter?.quarter ?? "3C"}: ${bestQuarter?.recommendation ?? "subir agresividad despues del descanso."}` },
-    { title: "5. Cierre", value: `${riskQuarter?.quarter ?? "4C"}: proteger ritmo, faltas y seleccion de tiro.` }
+    { title: "4. Cuarto de quiebre / cierre", value: `${bestQuarter?.quarter ?? "3C"}: ${bestQuarter?.recommendation ?? "subir agresividad despues del descanso."} · ${riskQuarter?.quarter ?? "4C"}: proteger ritmo y seleccion de tiro.` }
   ].forEach((item, index) => {
-    const y = 330 - index * 52;
-    addRect(benchPage, 46, y - 24, 600, 38, index === 0 ? [0.96, 0.85, 0.25] : [0.14, 0.17, 0.15], [0.28, 0.32, 0.28]);
-    addText(benchPage, item.title, 64, y - 2, 10, index === 0 ? dark : [0.96, 0.85, 0.25], "F2");
-    addWrappedText(benchPage, item.value, 208, y + 1, 402, 9.5, index === 0 ? dark : [1, 1, 1], "F1", 11, 2);
+    const x = 42 + (index % 2) * 438;
+    const y = 250 - Math.floor(index / 2) * 58;
+    addRect(planPage, x, y - 22, 418, 38, index === 0 ? [1, 0.96, 0.9] : [1, 1, 1], [0.87, 0.88, 0.86]);
+    addText(planPage, item.title, x + 16, y - 1, 9.1, index === 0 ? [0.5, 0.32, 0.02] : primary, "F2");
+    addWrappedText(planPage, item.value, x + 140, y + 1, 258, 8.8, [0.22, 0.28, 0.25], "F1", 10.5, 2);
   });
-  addRect(benchPage, 700, 96, 176, 270, [0.96, 0.85, 0.25], [0.96, 0.85, 0.25]);
-  addText(benchPage, "WIN PROB", 724, 326, 10, dark, "F2");
-  addText(benchPage, `${model.prediction.ownWinProbability}%`, 724, 270, 42, dark, "F2");
-  addText(benchPage, "Margen", 724, 218, 10, dark, "F2");
-  addWrappedText(benchPage, model.prediction.marginRange, 724, 194, 118, 15, dark, "F2", 18, 2);
-  addText(benchPage, "Confianza", 724, 138, 10, dark, "F2");
-  addText(benchPage, `${Math.round(model.prediction.confidence * 100)}%`, 724, 112, 22, dark, "F2");
-  addText(benchPage, "DOS Scout Pro · decision first scouting", 46, 36, 9, [0.78, 0.82, 0.78], "F2");
-  addText(benchPage, "15 / 15", 870, 36, 9, [0.96, 0.85, 0.25], "F2");
-  pages.push(benchPage.join("\n"));
+  addInsightListCard(planPage, "Ventaja propia a cargar", [
+    topOwn ? `${topOwn.name} · ${topOwn.role} · impacto ${formatPdfNumber(topOwn.recentImpactIndex)}` : "Sin ventaja propia confirmada.",
+    "Emparejarlo con el defensor mas vulnerable despues del primer cambio rival.",
+    "Si el rival cambia matchup, repetir la busqueda en las siguientes dos posesiones."
+  ], 42, 136, 420, 64, primary);
+  addInsightListCard(planPage, "Regla simple para jugadores", [
+    `Quitar primera ventaja de ${topThreat?.name ?? "la amenaza principal"}.`,
+    "No regalar rebote ofensivo ni balance temprano.",
+    `En ${bestQuarter?.quarter ?? "3C"} subir agresividad sin romper seleccion de tiro.`
+  ], 498, 136, 420, 64, amber);
+  addFooter(planPage, `11 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(planPage.join("\n"));
+
+  const validationPage: string[] = [];
+  addHeader(validationPage, "Validacion y trazabilidad", "Lo proyectado vs lo real para vender aprendizaje, no solo prediccion", `12 / ${String(totalPages).padStart(2, "0")}`, primary);
+  addRect(validationPage, 42, 346, 876, 64, model.planValidation.headline.toLowerCase().includes("fuera") ? [1, 0.94, 0.94] : [0.9, 0.97, 0.94], [0.86, 0.88, 0.86]);
+  addText(validationPage, "VALIDACION DEL PLAN", 62, 384, 9, model.planValidation.headline.toLowerCase().includes("fuera") ? red : primary, "F2");
+  addWrappedText(validationPage, model.planValidation.headline, 62, 360, 760, 18, dark, "F2", 22, 2);
+  model.planValidation.checks.slice(0, 3).forEach((check, index) => {
+    const y = 302 - index * 64;
+    const statusColor: PdfRgb = check.status === "logrado" ? primary : check.status === "fallo" ? red : amber;
+    addShadowRect(validationPage, 42, y - 42, 876, 50, [1, 1, 1], [0.88, 0.9, 0.88]);
+    addText(validationPage, check.label, 62, y - 10, 9.5, dark, "F2");
+    addText(validationPage, `${check.projected} -> ${check.actual}`, 252, y - 10, 9.5, muted, "F1");
+    addText(validationPage, check.status.toUpperCase(), 520, y - 10, 9, statusColor, "F2");
+    addWrappedText(validationPage, check.decision, 640, y - 6, 230, 8.4, [0.22, 0.28, 0.25], "F1", 10, 2);
+  });
+  addInsightListCard(validationPage, "Trazabilidad", [
+    `${sourceCount} fuentes / registros considerados en el dossier.`,
+    "Dato confirmado, inferencia y conclusion tactica separados en cada decision.",
+    "Usar este documento como base de staff y validar con video si cambia disponibilidad."
+  ], 42, 86, 876, 84, amber);
+  addFooter(validationPage, `12 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(validationPage.join("\n"));
+
+  return buildPdfDocument(pages);
+}
+
+export function buildTechnicalLongPdf(model: MatchupScout, shots: ShotRow[] = [], shotGames: GameRow[] = []) {
+  const primary = teamPrimaryColor(model.ownTeam.team.name);
+  const dark: PdfRgb = [0.055, 0.075, 0.062];
+  const amber: PdfRgb = [0.96, 0.62, 0.04];
+  const red: PdfRgb = [0.88, 0.11, 0.28];
+  const own = model.ownTeam.team;
+  const rival = model.rivalTeam.team;
+  const league = competitionCopy(own.competition as CompetitionKey);
+  const latestRivalGames = shotGames;
+  const topThreat = model.rivalPlayers[0];
+  const bestQuarter = [...model.quarterModel].sort((a, b) => b.differential - a.differential)[0];
+  const riskQuarter = [...model.quarterModel].sort((a, b) => a.differential - b.differential)[0];
+  const featuredShotPlayers = model.rivalPlayers.slice(0, 4).map((player) => {
+    const playerShots = shots.filter((shot) => sameShotRowForPlayer(player, player.name, shot, model.rivalPlayers));
+    const latest = latestShotGameForPlayer(playerShots, latestRivalGames);
+    return {
+      player,
+      shots: latest.shots,
+      label: latest.label,
+      summary: shotSummary(latest.shots),
+      analysis: buildShotAnalysis(player.name, latest.shots, player)
+    };
+  });
+  const shotFocus = featuredShotPlayers.slice(0, 3);
+  const loadAnalysis = buildTeamShotLoadAnalysis(shots, model.rivalPlayers);
+  const ownRadarMetrics = [
+    { label: "Ataque", value: pairScores(getPointsForPerGame(own), getPointsForPerGame(rival)).own },
+    { label: "Defensa", value: pairScores(getPointsAgainstPerGame(own), getPointsAgainstPerGame(rival), true).own },
+    { label: "Rebote", value: pairScores(getReboundsPerGame(own), getReboundsPerGame(rival)).own },
+    { label: "Creacion", value: pairScores(getAssistsPerGame(own), getAssistsPerGame(rival)).own },
+    { label: "Diferencial", value: clampPdf(50 + (getPointDifferential(own) - getPointDifferential(rival)) * 4, 10, 90) },
+    { label: "Prediccion", value: model.prediction.ownWinProbability }
+  ];
+  const rivalRadarMetrics = [
+    { label: "Ataque", value: pairScores(getPointsForPerGame(own), getPointsForPerGame(rival)).rival },
+    { label: "Defensa", value: pairScores(getPointsAgainstPerGame(own), getPointsAgainstPerGame(rival), true).rival },
+    { label: "Rebote", value: pairScores(getReboundsPerGame(own), getReboundsPerGame(rival)).rival },
+    { label: "Creacion", value: pairScores(getAssistsPerGame(own), getAssistsPerGame(rival)).rival },
+    { label: "Diferencial", value: clampPdf(50 + (getPointDifferential(rival) - getPointDifferential(own)) * 4, 10, 90) },
+    { label: "Prediccion", value: model.prediction.rivalWinProbability }
+  ];
+  const totalPages = 8;
+  const pages: string[] = [];
+
+  const cover: string[] = [];
+  addRect(cover, 0, 0, 960, 540, [0.95, 0.97, 0.96]);
+  addRect(cover, 0, 0, 960, 18, primary);
+  addRect(cover, 0, 410, 960, 130, dark);
+  addText(cover, "REPORTE TECNICO LARGO", 52, 482, 24, [1, 1, 1], "F2");
+  addWrappedText(cover, `${own.name} vs ${rival.name}`, 52, 446, 520, 28, [1, 1, 1], "F2", 30, 2);
+  addText(cover, `${league.label} · lectura profunda para staff · ${new Date().toLocaleDateString("es-CL")}`, 54, 418, 10.5, [0.78, 0.82, 0.78], "F1");
+  addMetricCard(cover, "Ventaja principal", model.decisionBrief[0]?.value ?? "s/d", model.decisionBrief[0]?.action ?? "sin decision automatica", 54, 354, 250, 94, primary);
+  addMetricCard(cover, "Riesgo principal", model.decisionBrief[1]?.value ?? "s/d", model.decisionBrief[1]?.action ?? "sin riesgo detectado", 324, 354, 250, 94, red);
+  addMetricCard(cover, "Cuarto clave", bestQuarter?.quarter ?? "s/d", bestQuarter?.recommendation ?? "sin tramo de quiebre", 594, 354, 146, 94, amber);
+  addMetricCard(cover, "Prediccion", `${model.prediction.ownWinProbability}%`, model.prediction.marginRange, 758, 354, 150, 94, primary);
+  addInsightListCard(
+    cover,
+    "Tres focos del documento",
+    [
+      `${topThreat?.name ?? "Amenaza principal"} y su ultima carta de tiro disponible.`,
+      `Momentum por cuartos con pico en ${bestQuarter?.quarter ?? "s/d"} y riesgo en ${riskQuarter?.quarter ?? "s/d"}.`,
+      `${loadAnalysis.shareTopThree}% del volumen rival cae en su top 3 ofensivo.`
+    ],
+    54,
+    206,
+    854,
+    118,
+    primary,
+    "Documento largo: combina lectura visual, staff plan y respaldo estadistico sin sobrecargar la toma de decision."
+  );
+  addFooter(cover, `01 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(cover.join("\n"));
+
+  const radarPage: string[] = [];
+  addHeader(radarPage, "Diagnostico visual", "Radares separados para evitar ruido y dejar clara la identidad de cada lado", `02 / ${String(totalPages).padStart(2, "0")}`, primary);
+  addRect(radarPage, 42, 84, 408, 332, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(radarPage, "Radar propio", 66, 386, primary);
+  addSingleRadarChart(radarPage, ownRadarMetrics, 98, 132, 112, primary, own.name);
+  addRect(radarPage, 510, 84, 408, 332, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(radarPage, "Radar rival", 534, 386, red);
+  addSingleRadarChart(radarPage, rivalRadarMetrics, 566, 132, 112, red, rival.name);
+  addInsightListCard(
+    radarPage,
+    "Lectura comparativa",
+    [
+      `Propio: ${model.comparison[0]?.value ?? "sin señal dominante"}.`,
+      `Rival: ${model.rivalIdentity.summary}.`,
+      `Prediccion: ${model.prediction.ownWinProbability}% propia · margen ${model.prediction.marginRange}.`
+    ],
+    42,
+    72,
+    876,
+    84,
+    amber
+  );
+  addFooter(radarPage, `02 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(radarPage.join("\n"));
+
+  const quarterPage: string[] = [];
+  addHeader(quarterPage, "Momentum por cuartos", "Linea de puntos a favor y en contra con picos visibles para decidir el plan", `03 / ${String(totalPages).padStart(2, "0")}`, primary);
+  addRect(quarterPage, 42, 170, 876, 246, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(quarterPage, "Tendencia de anotacion", 66, 386, primary);
+  addMomentumLineChart(quarterPage, model.quarterModel, 96, 214, 770, 150, primary);
+  addRect(quarterPage, 674, 330, 198, 56, [1, 0.97, 0.9], [0.92, 0.84, 0.68]);
+  addText(quarterPage, "Pico de momentum", 688, 364, 8.5, [0.5, 0.32, 0.02], "F2");
+  addWrappedText(quarterPage, `${bestQuarter?.quarter ?? "s/d"} · ${bestQuarter?.recommendation ?? "sin lectura"}`, 688, 340, 166, 10.2, dark, "F2", 12, 2);
+  addRect(quarterPage, 674, 266, 198, 56, [1, 0.94, 0.94], [0.92, 0.76, 0.76]);
+  addText(quarterPage, "Cuarto a resistir", 688, 300, 8.5, red, "F2");
+  addWrappedText(quarterPage, `${riskQuarter?.quarter ?? "s/d"} · ${riskQuarter?.recommendation ?? "sin lectura"}`, 688, 276, 166, 10.2, dark, "F2", 12, 2);
+  model.quarterModel.forEach((quarter, index) => {
+    addMetricCard(
+      quarterPage,
+      quarter.quarter,
+      `${formatPdfNumber(quarter.pointsFor)} / ${formatPdfNumber(quarter.pointsAgainst)}`,
+      `${signedPdfNumber(quarter.differential)} · ${quarter.recommendation}`,
+      42 + index * 220,
+      142,
+      200,
+      80,
+      quarter.quarter === bestQuarter?.quarter ? amber : quarter.quarter === riskQuarter?.quarter ? red : primary
+    );
+  });
+  addFooter(quarterPage, `03 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(quarterPage.join("\n"));
+
+  shotFocus.forEach((focus, index) => {
+    const shotPage: string[] = [];
+    const pageNumber = 4 + index;
+    addHeader(
+      shotPage,
+      "Jugador clave · ultima carta de tiro",
+      `${focus.player.name} · ${focus.player.role} · ${focus.label}`,
+      `${String(pageNumber).padStart(2, "0")} / ${String(totalPages).padStart(2, "0")}`,
+      primary
+    );
+    addPlayerShotMiniCard(shotPage, focus, 42, 394, 876, 206, index === 0 ? red : primary);
+    addInsightListCard(shotPage, "Decisiones tipicas", focus.analysis.decisions, 42, 164, 270, 128, primary);
+    addInsightListCard(shotPage, "Fortalezas reales", focus.analysis.strengths, 330, 164, 270, 128, primary);
+    addInsightListCard(shotPage, "Debilidades explotables", focus.analysis.weaknesses, 618, 164, 300, 128, red);
+    addInsightListCard(shotPage, "Plan defensivo", focus.analysis.defensiveInstructions, 42, 74, 420, 86, amber);
+    addInsightListCard(shotPage, "Como atacarlo", focus.analysis.attackInstructions, 482, 74, 436, 86, primary);
+    addFooter(shotPage, `${String(pageNumber).padStart(2, "0")} / ${String(totalPages).padStart(2, "0")}`, model, primary);
+    pages.push(shotPage.join("\n"));
+  });
+
+  const loadPage: string[] = [];
+  addHeader(loadPage, "Carga ofensiva y zonas del rival", "Top 3 vs resto y correlacion tactica desde todas las cartas de tiro disponibles", `07 / ${String(totalPages).padStart(2, "0")}`, primary);
+  addRect(loadPage, 42, 248, 420, 168, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(loadPage, "Carga ofensiva", 66, 386, primary);
+  addText(loadPage, "Top 3", 72, 324, 10, primary, "F2");
+  addBar(loadPage, 126, 317, 292, loadAnalysis.topThreeAttempts, Math.max(loadAnalysis.topThreeAttempts + loadAnalysis.restAttempts, 1), primary);
+  addText(loadPage, `${loadAnalysis.topThreeAttempts} tiros · ${loadAnalysis.shareTopThree}%`, 312, 324, 9, dark, "F2");
+  addText(loadPage, "Resto", 72, 286, 10, red, "F2");
+  addBar(loadPage, 126, 279, 292, loadAnalysis.restAttempts, Math.max(loadAnalysis.topThreeAttempts + loadAnalysis.restAttempts, 1), red);
+  addText(loadPage, `${loadAnalysis.restAttempts} tiros`, 312, 286, 9, dark, "F2");
+  addInsightListCard(
+    loadPage,
+    "Top 3 ofensivo",
+    loadAnalysis.topNames.length > 0 ? loadAnalysis.topNames : ["Sin tiros confirmados en la muestra"],
+    66,
+    218,
+    372,
+    100,
+    primary,
+    "Si el volumen esta muy concentrado, vale cambiar cobertura antes que repartir ayudas tarde."
+  );
+  addRect(loadPage, 490, 248, 428, 168, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(loadPage, "Mapa de zonas", 516, 386, red);
+  addMetricCard(loadPage, "Zona dominante", loadAnalysis.summary.topZone, `${loadAnalysis.summary.topZoneCount}/${loadAnalysis.summary.attempts} tiros`, 516, 342, 180, 84, red);
+  addMetricCard(loadPage, "Lado dominante", loadAnalysis.summary.topSide, `${loadAnalysis.summary.topQuarter} como cuarto de mayor volumen`, 712, 342, 180, 84, amber);
+  addInsightListCard(
+    loadPage,
+    "Correlacion tactica",
+    [
+      loadAnalysis.zoneNarrative,
+      loadAnalysis.summary.avoidedZones.length > 0 ? `Evitan ${loadAnalysis.summary.avoidedZones.slice(0, 2).join(" y ")}: orientar ayudas hacia esa lectura.` : "No evitan una sola zona: la clave es cortar la ventaja anterior al tiro.",
+      loadAnalysis.summary.mostEfficientZone ? `Su mejor eficiencia aparece en ${loadAnalysis.summary.mostEfficientZone.zone}. No regalar esa recepcion.` : "Muestra todavia corta para fijar una zona elite."
+    ],
+    516,
+    218,
+    376,
+    100,
+    amber
+  );
+  addThreeColumnInsight(loadPage, "Identidad rival", model.rivalIdentity.rhythm, model.rivalIdentity.offensiveStyle, 42, 72, 270, primary);
+  addThreeColumnInsight(loadPage, "Dependencia", model.rivalIdentity.playerDependency, loadAnalysis.shareTopThree >= 55 ? "El top 3 explica la mayor parte del volumen: ajustar primero ahi." : "La carga esta mas repartida: priorizar estructura colectiva antes que obsesionarse con un nombre.", 344, 72, 270, red);
+  addThreeColumnInsight(loadPage, "Clave staff", `${bestQuarter?.quarter ?? "s/d"} / ${riskQuarter?.quarter ?? "s/d"}`, `Atacar ${bestQuarter?.quarter ?? "s/d"} y proteger ${riskQuarter?.quarter ?? "s/d"} mientras se niega ${loadAnalysis.summary.topZone}.`, 646, 72, 272, amber);
+  addFooter(loadPage, `07 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(loadPage.join("\n"));
+
+  const closePage: string[] = [];
+  addHeader(closePage, "Rotacion, comparativo y plan final", "Cierre profundo para staff con foco en quintetos y decisiones finales", `08 / ${String(totalPages).padStart(2, "0")}`, primary);
+  addRotationList(closePage, "Quinteto rival", model.rivalRotation.starters, 42, 396, 280, red);
+  addRotationList(closePage, "Primeros cambios", model.rivalRotation.firstChanges, 342, 396, 280, amber);
+  addRotationList(closePage, "Cierre rival", model.rivalRotation.closers, 642, 396, 276, red);
+  addInsightListCard(
+    closePage,
+    "Comparativo final",
+    [
+      model.comparison[0]?.value ?? "Sin señal comparativa",
+      model.comparison[1]?.value ?? "Sin segunda señal comparativa",
+      `Prediccion propia ${model.prediction.ownWinProbability}% · margen ${model.prediction.marginRange}`
+    ],
+    42,
+    206,
+    420,
+    114,
+    primary
+  );
+  addInsightListCard(
+    closePage,
+    "Plan final de staff",
+    [
+      model.tacticalKeysCore[0]?.action ?? "Quitar primera ventaja rival.",
+      model.tacticalKeysCore[1]?.action ?? "Cargar nuestra ventaja principal.",
+      model.tacticalKeysCore[2]?.action ?? "Controlar rebote y margen de posesiones."
+    ],
+    482,
+    206,
+    436,
+    114,
+    amber
+  );
+  addInsightListCard(
+    closePage,
+    "Trazabilidad",
+    [
+      `${Math.max(model.sourceTrace.length, shotGames.length)} fuentes / juegos usados en este documento.`,
+      "La ultima carta de tiro por jugador pesa mas que la acumulada para evitar ruido.",
+      "Separar dato confirmado, inferencia y conclusion tactica antes de bajar a video."
+    ],
+    42,
+    74,
+    876,
+    98,
+    red
+  );
+  addFooter(closePage, `08 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(closePage.join("\n"));
+
+  return buildPdfDocument(pages);
+}
+
+export function buildPlayerDefenseReportPdf(model: MatchupScout, shots: ShotRow[] = [], shotGames: GameRow[] = []) {
+  const primary = teamPrimaryColor(model.ownTeam.team.name);
+  const dark: PdfRgb = [0.055, 0.075, 0.062];
+  const red: PdfRgb = [0.88, 0.11, 0.28];
+  const amber: PdfRgb = [0.96, 0.62, 0.04];
+  const own = model.ownTeam.team;
+  const rival = model.rivalTeam.team;
+  const focusPlayers = buildPlayerDefenseFocus(model, shots, shotGames);
+  const totalPages = 1 + focusPlayers.length;
+  const pages: string[] = [];
+
+  const cover: string[] = [];
+  addRect(cover, 0, 0, 960, 540, [0.95, 0.97, 0.96]);
+  addRect(cover, 0, 394, 960, 146, dark);
+  addRect(cover, 0, 0, 960, 16, primary);
+  addText(cover, "PLAN DEFENSIVO POR JUGADOR", 52, 484, 24, [1, 1, 1], "F2");
+  addWrappedText(cover, `${own.name} vs ${rival.name}`, 52, 448, 500, 28, [1, 1, 1], "F2", 30, 2);
+  addText(cover, "Documento simple para jugador y staff: quien es, que busca y que no podemos darle.", 54, 418, 10.2, [0.78, 0.82, 0.78], "F1");
+  addMetricCard(cover, "Amenaza 1", focusPlayers[0]?.player.name ?? "s/d", focusPlayers[0]?.tag ?? "sin foco", 54, 350, 248, 88, red);
+  addMetricCard(cover, "Titulares de apoyo", `${focusPlayers.filter((item) => item.source === "titular").length} focos`, "Otros jugadores estructurales que sostienen al rival", 322, 350, 248, 88, primary);
+  addMetricCard(cover, "Banca clave", `${focusPlayers.filter((item) => item.source === "banca").length} cambios`, "Los dos nombres que pueden cambiar ritmo entrando desde banco", 590, 350, 318, 88, amber);
+  addInsightListCard(
+    cover,
+    "Orden de prioridad defensiva",
+    focusPlayers.map((item) => `${item.rank}. ${item.player.name} · ${item.tag} · ${item.player.role}`),
+    54,
+    228,
+    854,
+    170,
+    primary,
+    "Lectura pensada para que el jugador entienda rapido: quien manda, quien acompaña y quien entra desde la banca."
+  );
+  addInsightListCard(
+    cover,
+    "Regla del documento",
+    [
+      "No sobrecargar con estadistica: una idea clara por jugador.",
+      "Ultima carta de tiro por foco para que la lectura sea facil de entender.",
+      "Siempre responder dos cosas: que no darle y que queremos que haga."
+    ],
+    54,
+    70,
+    854,
+    92,
+    amber
+  );
+  addFooter(cover, `01 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(cover.join("\n"));
+
+  focusPlayers.forEach((focus, index) => {
+    const page: string[] = [];
+    const pageNumber = index + 2;
+    const accent = focus.rank === 1 ? red : focus.source === "banca" ? amber : primary;
+    addHeader(
+      page,
+      `${focus.tag} · Prioridad ${focus.rank}`,
+      `${focus.player.name} · ${focus.player.role} · ${focus.label}`,
+      `${String(pageNumber).padStart(2, "0")} / ${String(totalPages).padStart(2, "0")}`,
+      primary
+    );
+    addRect(page, 42, 284, 876, 132, [1, 1, 1], [0.86, 0.88, 0.86]);
+    addText(page, focus.player.name, 62, 378, 22, [0.06, 0.08, 0.07], "F2");
+    addText(page, `${focus.tag} · ${focus.player.playerType} · ${formatPdfNumber(focus.player.minutes)} MIN/PJ · ${formatPdfNumber(focus.player.points)} PTS/PJ`, 64, 350, 10, [0.36, 0.42, 0.39], "F1");
+    addWrappedText(page, focus.analysis.headline, 64, 320, 520, 13, dark, "F2", 15, 3);
+    addMetricCard(page, "No darle", focus.summary.topZone, focus.summary.attempts > 0 ? `Mayor carga en ${focus.summary.topQuarter} · ${focus.summary.efficiency}` : "sin carta confirmada", 622, 384, 140, 94, accent);
+    addMetricCard(page, "Queremos que haga", focus.summary.avoidedZones[0] ?? "tiro menos comodo", focus.summary.avoidedZones.length > 0 ? `orientarlo hacia ${focus.summary.avoidedZones[0]}` : "obligarlo a segunda decision", 778, 384, 140, 94, amber);
+    addRect(page, 42, 94, 276, 160, [1, 1, 1], [0.86, 0.88, 0.86]);
+    addSectionKicker(page, "Ultima carta de tiro", 62, 226, accent);
+    if (focus.shots.length > 0) {
+      addShotCourt(page, focus.shots, 64, 118, 232, 112, accent);
+      addText(page, "Convertido", 66, 104, 8, accent, "F2");
+      addText(page, "Fallado", 136, 104, 8, red, "F2");
+    } else {
+      addWrappedText(page, "Sin carta confirmada en el ultimo partido. Mantener regla simple y validar con video.", 70, 180, 220, 11, [0.36, 0.42, 0.39], "F2", 14, 4);
+    }
+    addRect(page, 332, 94, 274, 160, [1, 1, 1], [0.86, 0.88, 0.86]);
+    addSectionKicker(page, "Como juega", 352, 226, primary);
+    addInsightListCard(page, "Lectura rapida", [focus.analysis.decisions[0], focus.analysis.strengths[0], focus.analysis.decisions[2]], 350, 212, 238, 106, primary);
+    addText(page, "Volumen por cuartos", 350, 104, 8.5, [0.36, 0.42, 0.39], "F2");
+    addQuarterVolumeStrip(page, focus.shots, 350, 82, 230, accent);
+    addRect(page, 620, 94, 298, 160, [1, 1, 1], [0.86, 0.88, 0.86]);
+    addSectionKicker(page, "Regla defensiva", 642, 226, amber);
+    addInsightListCard(page, "Que hacer", [focus.analysis.defensiveInstructions[0], focus.analysis.defensiveInstructions[1], focus.analysis.defensiveInstructions[2]], 640, 212, 258, 106, amber);
+    addInsightListCard(page, "Como atacarlo", [focus.analysis.attackInstructions[0], focus.analysis.attackInstructions[1], focus.analysis.weaknesses[0]], 42, 76, 420, 78, primary);
+    addInsightListCard(page, "Mensaje corto para jugador", [
+      focus.analysis.decisions[0].replace("Primera lectura: ", ""),
+      `No le des ${focus.summary.topZone === "sin zona dominante" ? "ritmo" : focus.summary.topZone}.`,
+      `Hazlo jugar hacia ${focus.summary.avoidedZones[0] ?? "su tiro menos comodo"}.`
+    ], 482, 76, 436, 78, accent);
+    addFooter(page, `${String(pageNumber).padStart(2, "0")} / ${String(totalPages).padStart(2, "0")}`, model, primary);
+    pages.push(page.join("\n"));
+  });
+
+  return buildPdfDocument(pages);
+}
+
+export function buildExpressReportPdf(model: MatchupScout, shots: ShotRow[] = [], shotGames: GameRow[] = []) {
+  const primary = teamPrimaryColor(model.ownTeam.team.name);
+  const dark: PdfRgb = [0.055, 0.075, 0.062];
+  const red: PdfRgb = [0.88, 0.11, 0.28];
+  const amber: PdfRgb = [0.96, 0.62, 0.04];
+  const own = model.ownTeam.team;
+  const rival = model.rivalTeam.team;
+  const topThreat = model.rivalPlayers[0];
+  const bestQuarter = [...model.quarterModel].sort((a, b) => b.differential - a.differential)[0];
+  const riskQuarter = [...model.quarterModel].sort((a, b) => a.differential - b.differential)[0];
+  const threatShots = topThreat
+    ? latestShotGameForPlayer(
+        shots.filter((shot) => sameShotRowForPlayer(topThreat, topThreat.name, shot, model.rivalPlayers)),
+        shotGames
+      )
+    : { shots: [] as ShotRow[], label: "Sin carta confirmada." };
+  const threatSummary = shotSummary(threatShots.shots);
+  const threatAnalysis = buildShotAnalysis(topThreat?.name ?? "Amenaza principal", threatShots.shots, topThreat);
+  const quickKeys = model.tacticalKeysCore.slice(0, 4);
+  const quarterLine = `${bestQuarter?.quarter ?? "s/d"} para atacar · ${riskQuarter?.quarter ?? "s/d"} para resistir`;
+  const totalPages = 2;
+  const pages: string[] = [];
+
+  const pageOne: string[] = [];
+  addRect(pageOne, 0, 0, 960, 540, [0.955, 0.972, 0.962]);
+  addRect(pageOne, 0, 0, 960, 16, primary);
+  addRect(pageOne, 0, 404, 960, 136, dark);
+  addText(pageOne, "BRIEF DE PARTIDO", 52, 484, 24, [1, 1, 1], "F2");
+  addWrappedText(pageOne, `${own.name} vs ${rival.name}`, 52, 448, 520, 28, [1, 1, 1], "F2", 30, 2);
+  addText(pageOne, "Lectura rapida para staff y jugadores. Si lo lees en un minuto, ya sabes que hacer.", 54, 420, 10.2, [0.78, 0.82, 0.78], "F1");
+  addMetricCard(pageOne, "Ventaja", model.decisionBrief[0]?.value ?? "s/d", model.decisionBrief[0]?.action ?? "sin ventaja detectada", 54, 352, 250, 88, primary);
+  addMetricCard(pageOne, "Riesgo", model.decisionBrief[1]?.value ?? "s/d", model.decisionBrief[1]?.action ?? "sin riesgo detectado", 324, 352, 250, 88, red);
+  addMetricCard(pageOne, "Foco rival", topThreat?.name ?? "s/d", topThreat ? `${topThreat.role} · ${formatPdfNumber(topThreat.points)} PTS/PJ` : "sin amenaza confirmada", 594, 352, 150, 88, red);
+  addMetricCard(pageOne, "Prediccion", `${model.prediction.ownWinProbability}%`, model.prediction.marginRange, 760, 352, 148, 88, amber);
+  addRect(pageOne, 54, 232, 854, 94, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(pageOne, "Si solo tienes 30 segundos", 76, 296, primary);
+  addWrappedText(pageOne, model.decisionBrief[0]?.action ?? "Controlar ritmo, rebote y primera ventaja rival.", 76, 266, 510, 18, dark, "F2", 21, 2);
+  addText(pageOne, quarterLine, 650, 274, 10, [0.36, 0.42, 0.39], "F2");
+  addWrappedText(pageOne, `Regla simple: ${quickKeys[0]?.action ?? "quitar primera ventaja rival"} · ${quickKeys[1]?.action ?? "cargar nuestra ventaja"}.`, 650, 248, 220, 9.5, [0.22, 0.28, 0.25], "F1", 12, 3);
+  quickKeys.forEach((key, index) => {
+    const x = 54 + (index % 2) * 428;
+    const y = 194 - Math.floor(index / 2) * 64;
+    addRect(pageOne, x, y - 22, 410, 42, [1, 1, 1], [0.87, 0.88, 0.86]);
+    addText(pageOne, `Clave ${index + 1}`, x + 14, y - 1, 8.8, index === 0 ? primary : index === 1 ? red : amber, "F2");
+    addWrappedText(pageOne, key.action, x + 92, y + 2, 304, 9.2, [0.22, 0.28, 0.25], "F1", 11, 2);
+  });
+  addFooter(pageOne, `01 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(pageOne.join("\n"));
+
+  const pageTwo: string[] = [];
+  addHeader(pageTwo, "Refuerzo visual", "Mini comparacion, amenaza principal y regla final para el equipo", `02 / ${String(totalPages).padStart(2, "0")}`, primary);
+  addRect(pageTwo, 42, 238, 324, 178, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(pageTwo, "Mini comparacion", 66, 386, primary);
+  addComparisonRow(pageTwo, "PTS/PJ", getPointsForPerGame(own), getPointsForPerGame(rival), 68, 336, 268, primary);
+  addComparisonRow(pageTwo, "REB/PJ", getReboundsPerGame(own), getReboundsPerGame(rival), 68, 294, 268, primary);
+  addComparisonRow(pageTwo, "DIF", getPointDifferential(own), getPointDifferential(rival), 68, 252, 268, primary);
+  addWrappedText(pageTwo, `Ventaja simple: ${model.comparison[0]?.value ?? "partido parejo"}.`, 68, 210, 250, 9.2, [0.22, 0.28, 0.25], "F1", 11, 2);
+
+  addRect(pageTwo, 388, 238, 530, 178, [1, 1, 1], [0.86, 0.88, 0.86]);
+  addSectionKicker(pageTwo, "Amenaza principal", 412, 386, red);
+  addText(pageTwo, topThreat?.name ?? "Sin amenaza", 412, 358, 16, dark, "F2");
+  addText(pageTwo, topThreat ? `${topThreat.role} · ${formatPdfNumber(topThreat.minutes)} MIN/PJ` : "sin muestra", 414, 338, 9.4, [0.36, 0.42, 0.39], "F1");
+  addRect(pageTwo, 412, 256, 188, 70, [0.96, 0.98, 0.97], [0.82, 0.85, 0.82]);
+  if (threatShots.shots.length > 0) {
+    addShotCourt(pageTwo, threatShots.shots, 420, 264, 172, 54, red);
+  } else {
+    addWrappedText(pageTwo, "Sin carta confirmada.", 444, 292, 110, 9.2, [0.36, 0.42, 0.39], "F2", 11, 2);
+  }
+  addInsightListCard(
+    pageTwo,
+    "Lectura rapida",
+    [
+      threatAnalysis.decisions[0],
+      `No darle ${threatSummary.topZone === "sin zona dominante" ? "ritmo" : threatSummary.topZone}.`,
+      `Queremos que juegue hacia ${threatSummary.avoidedZones[0] ?? "su tiro menos comodo"}.`
+    ],
+    618,
+    332,
+    276,
+    110,
+    red
+  );
+
+  addInsightListCard(
+    pageTwo,
+    "Badges del partido",
+    [
+      `Ventaja · ${model.decisionBrief[0]?.value ?? "s/d"}`,
+      `Riesgo · ${model.decisionBrief[1]?.value ?? "s/d"}`,
+      `Foco rival · ${topThreat?.name ?? "s/d"}`
+    ],
+    42,
+    76,
+    324,
+    86,
+    amber
+  );
+  addInsightListCard(
+    pageTwo,
+    "Regla final para el equipo",
+    [
+      quickKeys[0]?.action ?? "Quitar primera ventaja rival.",
+      quickKeys[1]?.action ?? "Cargar nuestra mejor ventaja.",
+      `${bestQuarter?.quarter ?? "s/d"} para atacar · ${riskQuarter?.quarter ?? "s/d"} para resistir.`
+    ],
+    388,
+    76,
+    530,
+    86,
+    primary
+  );
+  addFooter(pageTwo, `02 / ${String(totalPages).padStart(2, "0")}`, model, primary);
+  pages.push(pageTwo.join("\n"));
 
   return buildPdfDocument(pages);
 }
@@ -4000,15 +4663,22 @@ export function ScoutingPlatform() {
                 kind: "prepartido" as const,
                 filename: `dossier-tactico-pro-${competitionFileSlug(competition)}.pdf`,
                 title: "Dossier tactico pro",
-                description: "Dossier visual de 15 diapositivas: decisiones, forma, base temporada, rotaciones, planes individuales, carta de tiro y validacion.",
+                description: "Dossier visual de 12 paginas: decisiones, identidad rival, jugadores clave, ultima carta de tiro, rotacion, cuartos, comparativo y validacion.",
                 staffOnly: true
               },
               {
                 kind: "tecnico" as const,
                 filename: `reporte-tecnico-largo-${competitionFileSlug(competition)}.pdf`,
                 title: "Reporte tecnico largo",
-                description: "Version profunda con diagnostico, riesgos, video tags, trazabilidad y control de datos.",
+                description: "Version profunda con radares separados, momentum por cuartos, 3 ultimas cartas clave, carga ofensiva rival y plan final de staff.",
                 staffOnly: true
+              },
+              {
+                kind: "jugadores" as const,
+                filename: `plan-defensivo-por-jugador-${competitionFileSlug(competition)}.pdf`,
+                title: "Plan defensivo por jugador",
+                description: "7 focos reales: amenaza principal, otros 4 relevantes y 2 cambios de banca con ultima carta de tiro y regla simple.",
+                staffOnly: false
               },
               {
                 kind: "postpartido" as const,
@@ -4021,7 +4691,7 @@ export function ScoutingPlatform() {
                 kind: "resumen" as const,
                 filename: `informe-express-${competitionFileSlug(competition)}.pdf`,
                 title: "Informe express",
-                description: "Version corta para jugadores y staff, enfocada en 3-4 claves accionables.",
+                description: "Brief de 2 paginas para leer en un minuto: ventaja, riesgo, foco rival, cuartos y regla simple del partido.",
                 staffOnly: false
               }
             ].map((report) => (
@@ -4031,7 +4701,19 @@ export function ScoutingPlatform() {
                 key={report.kind}
                 onClick={() => {
                   if (report.kind === "prepartido") {
-                    downloadPdfDocument(report.filename, buildTacticalDossierPdf(model, rivalShots));
+                    downloadPdfDocument(report.filename, buildTacticalDossierPdf(model, rivalShots, rivalShotImportGames));
+                    return;
+                  }
+                  if (report.kind === "tecnico") {
+                    downloadPdfDocument(report.filename, buildTechnicalLongPdf(model, rivalShots, rivalShotImportGames));
+                    return;
+                  }
+                  if (report.kind === "jugadores") {
+                    downloadPdfDocument(report.filename, buildPlayerDefenseReportPdf(model, rivalShots, rivalShotImportGames));
+                    return;
+                  }
+                  if (report.kind === "resumen") {
+                    downloadPdfDocument(report.filename, buildExpressReportPdf(model, rivalShots, rivalShotImportGames));
                     return;
                   }
                   downloadPdf(report.filename, `${buildEditableReport(model, report.kind)}\n${buildShotReportSection(model, rivalShots)}`);
