@@ -1299,14 +1299,6 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
     const teamGames = games.filter((game) => {
       return game.status === "Final" && (areSameTeam(game.homeTeam, team.name) || areSameTeam(game.awayTeam, team.name));
     });
-    const officialTeamGames = games.filter((game) => {
-      return (
-        game.gameId.startsWith("GENIUS-") &&
-        game.status === "Final" &&
-        (areSameTeam(game.homeTeam, team.name) || areSameTeam(game.awayTeam, team.name))
-      );
-    });
-
     const computeTotals = (rows: GameRow[]) =>
       rows.reduce(
         (acc, game) => {
@@ -1334,15 +1326,9 @@ export function applyBoxscoreImports(data: DatasetMap, imports: BoxscoreImport[]
         importedStats.length === 0
           ? team.assistsPerGame
           : (importedStats.reduce((sum, stat) => sum + stat.assists, 0) / importedStats.length).toFixed(1);
-      const officialTotals = officialTeamGames.length > 0 ? computeTotals(officialTeamGames) : null;
 
       return {
         ...team,
-        gamesPlayed: officialTotals ? String(officialTeamGames.length) : team.gamesPlayed,
-        wins: officialTotals ? String(officialTotals.wins) : team.wins,
-        losses: officialTotals ? String(officialTotals.losses) : team.losses,
-        pointsFor: officialTotals ? String(officialTotals.pointsFor) : team.pointsFor,
-        pointsAgainst: officialTotals ? String(officialTotals.pointsAgainst) : team.pointsAgainst,
         reboundsPerGame: rebounds,
         assistsPerGame: assists
       };
