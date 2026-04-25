@@ -196,6 +196,18 @@ async function fetchEmbed(page: string, config: CompetitionSyncConfig) {
   return decodeHtml(payload.html ?? "");
 }
 
+async function fetchEmbedOptional(page: string, config: CompetitionSyncConfig) {
+  try {
+    return await fetchEmbed(page, config);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("404")) {
+      return "";
+    }
+    throw error;
+  }
+}
+
 function getCells(row: string) {
   return [...row.matchAll(/<td[\s\S]*?<\/td>/g)].map((cell) => stripTags(cell[0]));
 }
@@ -391,7 +403,7 @@ export async function POST(request: Request) {
     const config = getSyncConfig(body.competition);
     const phases = config.phases.length > 0 ? config.phases : [""];
     const [teamsHtml, teamTotalsHtml, ...phasePages] = await Promise.all([
-      fetchEmbed("/teams", config),
+      fetchEmbedOptional("/teams", config),
       fetchEmbed("/statistics/team", config),
       ...phases.flatMap((phase) => [
         fetchEmbed(phasePage("standings", phase), config),
@@ -399,7 +411,7 @@ export async function POST(request: Request) {
       ])
     ]);
 
-    const officialTeams = parseOfficialTeams(teamsHtml, config);
+    const officialTeamsFromStandings = new Map<string, OfficialTeam>();
     const standings = new Map<string, StandingInfo>();
     const schedules: GameRow[] = [];
 
@@ -410,10 +422,21 @@ export async function POST(request: Request) {
       parseStandings(standingsHtml, zone).forEach((row) => {
         if (row?.id) {
           standings.set(row.id, row.info);
+          if (!officialTeamsFromStandings.has(row.id)) {
+            officialTeamsFromStandings.set(row.id, {
+              id: row.id,
+              name: row.name,
+              canonicalName: canonicalTeamName(row.name, config),
+              logoUrl: ""
+            });
+          }
         }
       });
       schedules.push(...parseSchedule(scheduleHtml, zone, config));
     });
+
+    const parsedTeams = parseOfficialTeams(teamsHtml, config);
+    const officialTeams = parsedTeams.length > 0 ? parsedTeams : Array.from(officialTeamsFromStandings.values());
 
     const teamTotals = parseTeamTotals(teamTotalsHtml, config);
     const rosterPages = await Promise.all(

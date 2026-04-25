@@ -1034,7 +1034,7 @@ export function buildScoutingModel(
         confidence: holdQuarter.confidence
       }
     ],
-    reportSections: ["Informe premium", "Informe express", "Postpartido", "Reporte tecnico largo", "Presentacion"],
+    reportSections: ["Informe premium", "Plan defensivo por jugador", "Informe express", "Postpartido", "Reporte tecnico largo", "Presentacion"],
     presentationSections: [
       "Idea central",
       "30 segundos",
@@ -1052,7 +1052,7 @@ export function buildScoutingModel(
   };
 }
 
-type ReportKind = "prepartido" | "postpartido" | "presentacion" | "resumen" | "tecnico";
+type ReportKind = "prepartido" | "postpartido" | "presentacion" | "resumen" | "tecnico" | "jugadores";
 
 function formatNumber(value: number, digits = 1) {
   const rounded = Number(value.toFixed(digits));
@@ -1346,6 +1346,24 @@ function buildExecutiveSummary(model: MatchupScout) {
   ].join("\n");
 }
 
+function buildPlayerDefenseSummary(model: MatchupScout) {
+  return [
+    "# Plan defensivo por jugador",
+    `${model.ownTeam.team.name} vs ${model.rivalTeam.team.name}`,
+    "",
+    "## Prioridad defensiva",
+    ...model.rivalPlayers.slice(0, 7).map((player, index) => `- ${index + 1}. ${player.name}: ${player.role}; ${player.defensiveKey}`),
+    "",
+    "## Regla",
+    "- Documento simplificado para jugador y staff. Ver ultima carta de tiro, regla defensiva y foco individual.",
+    "",
+    "## Orden sugerido",
+    `- Amenaza principal: ${model.rivalPlayers[0]?.name ?? "s/d"}.`,
+    `- Primer cambio: ${model.rivalRotation.firstChanges[0] ?? "sin muestra"}.`,
+    `- Segundo cambio: ${model.rivalRotation.firstChanges[1] ?? "sin muestra"}.`
+  ].join("\n");
+}
+
 function buildPresentation(model: MatchupScout) {
   const topDecision = model.decisionBrief[0];
   const rivalThreats = model.rivalPlayers.slice(0, 3).map((player) => `- ${player.name}: ${player.playerType}; ${player.defensiveKey}`);
@@ -1407,6 +1425,9 @@ export function buildEditableReport(model: MatchupScout, kind: ReportKind) {
   }
   if (kind === "tecnico") {
     return buildTechnicalReport(model);
+  }
+  if (kind === "jugadores") {
+    return buildPlayerDefenseSummary(model);
   }
   return buildPregameReport(model);
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -42,7 +42,7 @@ const STORAGE_KEY = "dos-premium-scouting-v1";
 const TRACE_KEY = "dos-premium-source-trace-v1";
 
 const tabs = [
-  "Dashboard",
+  "Resumen",
   "Equipos",
   "Jugadores",
   "Rotacion",
@@ -56,10 +56,148 @@ const tabs = [
   "Admin"
 ] as const;
 
+const primaryLaunchTabs = ["Resumen", "Jugadores", "Carta de tiro", "Cuartos", "Rotacion", "Informes"] as const;
+
+const tabCardCopy: Record<
+  TabKey,
+  {
+    title: string;
+    description: string;
+    emphasis?: string;
+    variant: "primary" | "secondary" | "tool";
+    skin: string;
+    imageSrc: string;
+    imagePosition?: string;
+    previewTags: string[];
+  }
+> = {
+  Resumen: {
+    title: "Resumen",
+    description: "Ventaja, riesgo, foco rival y lectura inicial para arrancar por lo importante.",
+    emphasis: "Entrada rapida",
+    variant: "primary",
+    skin: "resumen",
+    imageSrc: "https://images.pexels.com/photos/6767042/pexels-photo-6767042.jpeg?cs=srgb&dl=pexels-cottonbro-6767042.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Ventaja", "Riesgo", "Foco rival"]
+  },
+  Equipos: {
+    title: "Equipos",
+    description: "Como llega cada equipo, record reciente y comportamiento por grupo o fase.",
+    emphasis: "Contexto general",
+    variant: "secondary",
+    skin: "equipos",
+    imageSrc: "https://images.pexels.com/photos/30555510/pexels-photo-30555510.jpeg?cs=srgb&dl=pexels-rodolphe-asensi-1884149264-30555510.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Tabla", "Forma", "Grupo"]
+  },
+  Jugadores: {
+    title: "Jugadores",
+    description: "Quien manda, como juega, que no darle y como defenderlo.",
+    emphasis: "Prioridades reales",
+    variant: "primary",
+    skin: "jugadores",
+    imageSrc: "https://images.pexels.com/photos/30555510/pexels-photo-30555510.jpeg?cs=srgb&dl=pexels-rodolphe-asensi-1884149264-30555510.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Prioridad 1", "Top 3", "Como defenderlo"]
+  },
+  Rotacion: {
+    title: "Rotacion",
+    description: "Quinteto probable, primeros cambios y cierre bajo presion.",
+    emphasis: "Uso del banco",
+    variant: "primary",
+    skin: "rotacion",
+    imageSrc: "https://images.pexels.com/photos/11686213/pexels-photo-11686213.jpeg?cs=srgb&dl=pexels-saidpexels-11686213.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Quinteto", "Cambios", "Cierre"]
+  },
+  "Carta de tiro": {
+    title: "Carta de tiro",
+    description: "Donde castiga el rival y como llevarlo a su tiro menos comodo.",
+    emphasis: "Lectura espacial",
+    variant: "primary",
+    skin: "carta",
+    imageSrc: "https://images.pexels.com/photos/20901473/pexels-photo-20901473.jpeg?cs=srgb&dl=pexels-rooster-photodesign-1141364686-20901473.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Zonas", "Ultimo partido", "Tiros"]
+  },
+  Cuartos: {
+    title: "Cuartos",
+    description: "Momentum, tramos para atacar y momentos para resistir mejor.",
+    emphasis: "Ritmo del partido",
+    variant: "primary",
+    skin: "cuartos",
+    imageSrc: "https://images.pexels.com/photos/6777233/pexels-photo-6777233.jpeg?cs=srgb&dl=pexels-cottonbro-6777233.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["1C", "2C", "3C", "4C"]
+  },
+  Comparativo: {
+    title: "Comparativo",
+    description: "Donde estamos arriba, donde estamos en riesgo y que matchup cargar.",
+    emphasis: "Choque directo",
+    variant: "secondary",
+    skin: "comparativo",
+    imageSrc: "https://images.pexels.com/photos/4990536/pexels-photo-4990536.jpeg?cs=srgb&dl=pexels-shkrabaanthony-4990536.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Propio vs rival", "Ventajas", "Riesgos"]
+  },
+  Informes: {
+    title: "Informes",
+    description: "Dossier, tecnico largo, express y plan defensivo listos para descargar.",
+    emphasis: "Salida premium",
+    variant: "primary",
+    skin: "informes",
+    imageSrc: "https://images.pexels.com/photos/4990536/pexels-photo-4990536.jpeg?cs=srgb&dl=pexels-shkrabaanthony-4990536.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Dossier", "PDF", "Descarga"]
+  },
+  Presentaciones: {
+    title: "Presentaciones",
+    description: "Material visual para charla tecnica, staff y lectura del partido.",
+    emphasis: "Uso de staff",
+    variant: "secondary",
+    skin: "presentaciones",
+    imageSrc: "https://images.pexels.com/photos/4101348/pexels-photo-4101348.jpeg?cs=srgb&dl=pexels-markus-winkler-1430818-4101348.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Charla", "Slide", "Staff"]
+  },
+  Notas: {
+    title: "Notas",
+    description: "Observaciones privadas para ordenar ideas, focos y pendientes.",
+    emphasis: "Trabajo interno",
+    variant: "secondary",
+    skin: "notas",
+    imageSrc: "https://images.pexels.com/photos/4101348/pexels-photo-4101348.jpeg?cs=srgb&dl=pexels-markus-winkler-1430818-4101348.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Ideas", "Pendientes", "Privado"]
+  },
+  Carga: {
+    title: "Carga",
+    description: "Subir links oficiales, reimportar y controlar el estado de la base.",
+    emphasis: "Herramienta",
+    variant: "tool",
+    skin: "carga",
+    imageSrc: "https://images.pexels.com/photos/4990536/pexels-photo-4990536.jpeg?cs=srgb&dl=pexels-shkrabaanthony-4990536.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Links", "Sync", "Estado"]
+  },
+  Admin: {
+    title: "Admin",
+    description: "Gestion de fuente oficial, trazabilidad, calidad de datos y permisos.",
+    emphasis: "Configuracion",
+    variant: "tool",
+    skin: "admin",
+    imageSrc: "https://images.pexels.com/photos/4101348/pexels-photo-4101348.jpeg?cs=srgb&dl=pexels-markus-winkler-1430818-4101348.jpg&fm=jpg",
+    imagePosition: "center",
+    previewTags: ["Fuente", "Trazabilidad", "Control"]
+  }
+};
+
 type TabKey = (typeof tabs)[number];
 type NoteScope = "rival" | "partido" | "jugador" | "equipo";
 type RangeKey = "Ultimos 3 partidos" | "Ultimos 5 partidos" | "Ultimos 8 disponibles";
 type LocalityKey = "Local y visita" | "Solo local" | "Solo visita";
+type ShotInsightTab = "lectura" | "plan" | "tendencia";
 type ScoutingCompetitionKey = "Liga DOS 2026" | "Liga Chery Apertura 2026" | "Liga Nacional Femenina 2026";
 type PrivateNote = {
   id: string;
@@ -3108,8 +3246,9 @@ function ensureNotes(value: unknown): PrivateNote[] {
 export function ScoutingPlatform() {
   const [data, setData] = useState<DatasetMap>(seedData);
   const [sourceTrace, setSourceTrace] = useState<SourceTrace[]>([]);
-  const [role, setRole] = useState<UserRole>("admin");
-  const [tab, setTab] = useState<TabKey>("Dashboard");
+  const [role] = useState<UserRole>("admin");
+  const [tab, setTab] = useState<TabKey>("Resumen");
+  const [showLaunchpad, setShowLaunchpad] = useState(true);
   const [activeCompetition, setActiveCompetition] = useState<ScoutingCompetitionKey>(LIGA_DOS_COMPETITION as ScoutingCompetitionKey);
   const [leagueMenuOpen, setLeagueMenuOpen] = useState(false);
   const [ownTeam, setOwnTeam] = useState("Sportiva Italiana");
@@ -3120,6 +3259,7 @@ export function ScoutingPlatform() {
   const [selectedTacticalPlayer, setSelectedTacticalPlayer] = useState("");
   const [shotPeriod, setShotPeriod] = useState<ShotPeriodFilter>("Todo");
   const [shotGameFilter, setShotGameFilter] = useState<ShotGameFilter>("Todos");
+  const [shotInsightTab, setShotInsightTab] = useState<ShotInsightTab>("lectura");
   const [urls, setUrls] = useState("");
   const [ingestStatus, setIngestStatus] = useState("Listo para pegar links FEBACHILE / Genius Sports.");
   const [officialSyncStatus, setOfficialSyncStatus] = useState("Base oficial lista para sincronizar standings, equipos, rosters y fixture.");
@@ -3128,6 +3268,22 @@ export function ScoutingPlatform() {
   const [notes, setNotes] = useState<PrivateNote[]>([]);
   const [noteForm, setNoteForm] = useState({ scope: "rival" as NoteScope, title: "", body: "" });
   const [storageReady, setStorageReady] = useState(false);
+  const activeOfficialSyncRef = useRef<CompetitionKey | null>(null);
+  const lastOfficialSyncAtRef = useRef<Partial<Record<CompetitionKey, number>>>({});
+  const lastAutoSyncSignatureRef = useRef("");
+
+  const openModule = useCallback((nextTab: TabKey) => {
+    setTab(nextTab);
+    setShowLaunchpad(false);
+  }, []);
+
+  const returnToLaunchpad = useCallback(() => {
+    setShowLaunchpad(true);
+  }, []);
+
+  useEffect(() => {
+    setShotInsightTab("lectura");
+  }, [selectedShotPlayer]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -3172,6 +3328,8 @@ export function ScoutingPlatform() {
   const canAdmin = role === "admin";
   const canCreateReports = role === "admin" || role === "entrenador" || role === "asistente";
   const visibleTabs = getVisibleTabs(role);
+  const primaryTabCards = primaryLaunchTabs.filter((item) => visibleTabs.includes(item));
+  const secondaryTabCards = visibleTabs.filter((item) => !primaryLaunchTabs.includes(item as (typeof primaryLaunchTabs)[number]));
   const scoutingFilters = useMemo<ScoutingFilters>(() => {
     const sampleSize = range === "Ultimos 3 partidos" ? 3 : range === "Ultimos 8 disponibles" ? 8 : 5;
     const filterLocality = locality === "Solo local" ? "home" : locality === "Solo visita" ? "away" : "all";
@@ -3339,8 +3497,17 @@ export function ScoutingPlatform() {
     }
   };
 
-  const handleOfficialSync = async () => {
-    setOfficialSyncStatus(`Sincronizando ${leagueCopy.shortLabel}: equipos, standings, fixture, rosters y estadisticas por equipo desde Genius...`);
+  const runOfficialSync = useCallback(async (mode: "manual" | "auto", contextLabel?: string) => {
+    if (activeOfficialSyncRef.current === competition) {
+      return;
+    }
+
+    activeOfficialSyncRef.current = competition;
+    setOfficialSyncStatus(
+      mode === "manual"
+        ? `Sincronizando ${leagueCopy.shortLabel}: equipos, standings, fixture, rosters y estadisticas por equipo desde Genius...`
+        : `Actualizando base oficial de ${leagueCopy.shortLabel} en segundo plano${contextLabel ? ` para ${contextLabel}` : ""}...`
+    );
 
     try {
       const response = await fetch("/api/sync-liga-dos", {
@@ -3356,6 +3523,7 @@ export function ScoutingPlatform() {
       }
 
       setData((current) => replaceCompetitionDataset(current, payload, competition));
+      lastOfficialSyncAtRef.current[competition] = Date.now();
       const now = payload.syncedAt ?? new Date().toISOString();
       setSourceTrace((current) => [
         {
@@ -3378,12 +3546,41 @@ export function ScoutingPlatform() {
         ...current
       ]);
       setOfficialSyncStatus(
-        `Sincronizacion oficial ${leagueCopy.shortLabel} completa: ${payload.teams.length} equipos, ${payload.players.length} jugadores y ${payload.games.length} partidos desde ${payload.sources.join(", ")}.`
+        mode === "manual"
+          ? `Sincronizacion oficial ${leagueCopy.shortLabel} completa: ${payload.teams.length} equipos, ${payload.players.length} jugadores y ${payload.games.length} partidos desde ${payload.sources.join(", ")}.`
+          : `Base oficial ${leagueCopy.shortLabel} actualizada automaticamente: ${payload.games.length} partidos oficiales y ${payload.players.length} jugadores listos para ${contextLabel ?? "el analisis actual"}.`
       );
     } catch (error) {
       setOfficialSyncStatus(error instanceof Error ? error.message : "Fallo inesperado al sincronizar Genius.");
+    } finally {
+      activeOfficialSyncRef.current = null;
     }
+  }, [competition, leagueCopy.shortLabel, leagueCopy.sourceUrl]);
+
+  const handleOfficialSync = async () => {
+    await runOfficialSync("manual");
   };
+
+  useEffect(() => {
+    if (!storageReady || teams.length === 0) {
+      return;
+    }
+
+    const signature = `${competition}|${ownTeam}|${rivalTeam}`;
+    const lastSyncAt = lastOfficialSyncAtRef.current[competition] ?? 0;
+    const syncIsFresh = Date.now() - lastSyncAt < 5 * 60 * 1000;
+
+    if (signature === lastAutoSyncSignatureRef.current && syncIsFresh) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      lastAutoSyncSignatureRef.current = signature;
+      void runOfficialSync("auto", `${ownTeam} vs ${rivalTeam}`);
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [competition, ownTeam, rivalTeam, runOfficialSync, storageReady, teams.length]);
 
   const addNote = () => {
     if (!noteForm.title.trim() || !noteForm.body.trim()) {
@@ -3402,13 +3599,6 @@ export function ScoutingPlatform() {
       ...current
     ]);
     setNoteForm({ scope: noteForm.scope, title: "", body: "" });
-  };
-
-  const handleRoleChange = (nextRole: UserRole) => {
-    setRole(nextRole);
-    if (!getVisibleTabs(nextRole).includes(tab)) {
-      setTab("Dashboard");
-    }
   };
 
   const handleCompetitionChange = (nextCompetition: ScoutingCompetitionKey) => {
@@ -3745,88 +3935,180 @@ export function ScoutingPlatform() {
             Datos oficiales, inferencias auditables y reportes PDF para preparar rival, rotacion y plan de partido.
           </p>
           <div className="hero-actions">
-            <button className="primary-button" type="button" onClick={() => setTab(canAdmin ? "Admin" : "Dashboard")}>
-              {canAdmin ? "Cargar links oficiales" : "Ver tablero"}
+            <button className="primary-button" type="button" onClick={() => openModule(canAdmin ? "Admin" : "Resumen")}>
+              {canAdmin ? "Cargar links oficiales" : "Ver resumen"}
             </button>
-            <button className="secondary-button" type="button" onClick={() => setTab("Informes")}>
+            <button className="secondary-button" type="button" onClick={() => openModule("Informes")}>
               Generar informe
             </button>
           </div>
         </div>
-        <aside className="hero-side">
-          <div className="league-photo" aria-label="Basquetbol chileno en competencia" />
-          <span>Perfil activo</span>
-          <strong>{role}</strong>
-          <small>{model.ownTeam.team.name}</small>
-          <small>{leagueCopy.shortLabel}</small>
-          <select value={role} onChange={(event) => handleRoleChange(event.target.value as UserRole)}>
-            {Object.keys(roleCapabilities).map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        </aside>
       </section>
 
-      <section className="control-bar">
-        <label>
-          Liga
-          <select value={activeCompetition} onChange={(event) => setActiveCompetition(event.target.value as ScoutingCompetitionKey)}>
-            {SCOUTING_COMPETITIONS.map((item) => (
-              <option key={item} value={item}>
-                {competitionCopy(item).shortLabel}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Equipo propio
-          <select value={ownTeam} onChange={(event) => setOwnTeam(event.target.value)}>
-            {teams.map((team) => (
-              <option key={team.teamId} value={team.name}>
-                {team.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Rival
-          <select value={rivalTeam} onChange={(event) => setRivalTeam(event.target.value)}>
-            {teams.map((team) => (
-              <option key={team.teamId} value={team.name}>
-                {team.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Muestra
-          <select value={range} onChange={(event) => setRange(event.target.value as RangeKey)}>
-            <option>Ultimos 3 partidos</option>
-            <option>Ultimos 5 partidos</option>
-            <option>Ultimos 8 disponibles</option>
-          </select>
-        </label>
-        <label>
-          Condicion
-          <select value={locality} onChange={(event) => setLocality(event.target.value as LocalityKey)}>
-            <option>Local y visita</option>
-            <option>Solo local</option>
-            <option>Solo visita</option>
-          </select>
-        </label>
+      <section className="control-bar prep-bar">
+        <div className="prep-stage">
+          <div className="prep-bar-header">
+            <div>
+              <p className="eyebrow">Preparar partido</p>
+              <h3>{ownTeam} vs {rivalTeam}</h3>
+              <p className="prep-kicker">
+                Configura el contexto del partido y deja la base oficial corriendo en segundo plano para entrar directo a lo importante.
+              </p>
+            </div>
+            <div className="prep-status">
+              <span>{leagueCopy.shortLabel}</span>
+              <small>{officialSyncStatus}</small>
+            </div>
+          </div>
+          <div className="prep-grid">
+            <label className="prep-field">
+              <div className="prep-field-top">
+                <span>Equipo propio</span>
+                <small>Tu base de trabajo</small>
+              </div>
+              <select value={ownTeam} onChange={(event) => setOwnTeam(event.target.value)}>
+                {teams.map((team) => (
+                  <option key={team.teamId} value={team.name}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="prep-field">
+              <div className="prep-field-top">
+                <span>Rival</span>
+                <small>Cambia el scouting activo</small>
+              </div>
+              <select value={rivalTeam} onChange={(event) => setRivalTeam(event.target.value)}>
+                {teams.map((team) => (
+                  <option key={team.teamId} value={team.name}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="prep-field prep-field-compact">
+              <div className="prep-field-top">
+                <span>Muestra</span>
+                <small>Base de lectura</small>
+              </div>
+              <select value={range} onChange={(event) => setRange(event.target.value as RangeKey)}>
+                <option>Ultimos 3 partidos</option>
+                <option>Ultimos 5 partidos</option>
+                <option>Ultimos 8 disponibles</option>
+              </select>
+            </label>
+            <label className="prep-field prep-field-compact">
+              <div className="prep-field-top">
+                <span>Condicion</span>
+                <small>Filtro situacional</small>
+              </div>
+              <select value={locality} onChange={(event) => setLocality(event.target.value as LocalityKey)}>
+                <option>Local y visita</option>
+                <option>Solo local</option>
+                <option>Solo visita</option>
+              </select>
+            </label>
+          </div>
+        </div>
       </section>
 
-      <nav className="module-nav" aria-label="Modulos de scouting">
-        {visibleTabs.map((item) => (
-          <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)} type="button">
-            {item}
+      {showLaunchpad ? (
+        <section className="launchpad-shell module-panel" aria-label="Entrada a modulos">
+          <div className="module-heading">
+            <div>
+              <p className="eyebrow">Preparacion guiada</p>
+              <h2>Entra directo a lo importante</h2>
+            </div>
+            <p className="status-copy">
+              Base oficial en segundo plano, equipo propio fijo y rival editable para trabajar sin perderse.
+            </p>
+          </div>
+          <div className="launchpad-grid primary">
+            {primaryTabCards.map((item, index) => {
+              const copy = tabCardCopy[item];
+              return (
+                <button
+                  className={`launchpad-card ${tab === item ? "active" : ""} ${copy.variant} skin-${copy.skin}`}
+                  key={item}
+                  onClick={() => openModule(item)}
+                  type="button"
+                >
+                  <div className="launchpad-preview" aria-hidden="true">
+                    <img
+                      className="launchpad-photo"
+                      src={copy.imageSrc}
+                      alt=""
+                      loading="lazy"
+                      style={{ objectPosition: copy.imagePosition ?? "center" }}
+                    />
+                    <div className="launchpad-preview-tint" />
+                    <div className="launchpad-preview-tags">
+                      {copy.previewTags.map((tag) => (
+                        <span key={tag}>{tag}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="launchpad-copy">
+                    <span>{`${String(index + 1).padStart(2, "0")} · ${copy.emphasis}`}</span>
+                    <strong>{copy.title}</strong>
+                    <p>{copy.description}</p>
+                    <small className="launchpad-action">Entrar ahora</small>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="launchpad-grid secondary">
+            {secondaryTabCards.map((item) => {
+              const copy = tabCardCopy[item];
+              return (
+                <button
+                  className={`launchpad-card compact ${tab === item ? "active" : ""} ${copy.variant} skin-${copy.skin}`}
+                  key={item}
+                  onClick={() => openModule(item)}
+                  type="button"
+                >
+                  <div className="launchpad-preview" aria-hidden="true">
+                    <img
+                      className="launchpad-photo"
+                      src={copy.imageSrc}
+                      alt=""
+                      loading="lazy"
+                      style={{ objectPosition: copy.imagePosition ?? "center" }}
+                    />
+                    <div className="launchpad-preview-tint" />
+                    <div className="launchpad-preview-tags">
+                      {copy.previewTags.map((tag) => (
+                        <span key={tag}>{tag}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="launchpad-copy">
+                    <span>{copy.emphasis}</span>
+                    <strong>{copy.title}</strong>
+                    <p>{copy.description}</p>
+                    <small className="launchpad-action">Abrir modulo</small>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : (
+        <section className="module-panel active-module-bar" aria-label="Modulo activo">
+          <button className="launchpad-back" type="button" onClick={returnToLaunchpad}>
+            Volver al inicio
           </button>
-        ))}
-      </nav>
+          <div className="active-module-copy">
+            <p className="eyebrow">Modulo activo</p>
+            <h3>{tabCardCopy[tab].title}</h3>
+            <p>{tabCardCopy[tab].description}</p>
+          </div>
+        </section>
+      )}
 
-      {tab === "Dashboard" ? (
+      {!showLaunchpad && tab === "Resumen" ? (
         <section className="module-grid">
           <section className="module-panel decision-room">
             <div className="module-heading">
@@ -3952,7 +4234,7 @@ export function ScoutingPlatform() {
         </section>
       ) : null}
 
-      {tab === "Carga" ? (
+      {!showLaunchpad && tab === "Carga" ? (
         <section className="module-panel">
           <div className="module-heading">
             <div>
@@ -4011,7 +4293,7 @@ export function ScoutingPlatform() {
         </section>
       ) : null}
 
-      {tab === "Equipos" ? (
+      {!showLaunchpad && tab === "Equipos" ? (
         <section className="two-column">
           <section className="module-panel zone-board">
             <div className="module-heading">
@@ -4050,7 +4332,7 @@ export function ScoutingPlatform() {
         </section>
       ) : null}
 
-      {tab === "Jugadores" ? (
+      {!showLaunchpad && tab === "Jugadores" ? (
         <>
           <section className="module-panel player-hub-panel">
             <div className="module-heading player-hub-heading">
@@ -4140,7 +4422,7 @@ export function ScoutingPlatform() {
               onSelect={setSelectedTacticalPlayer}
               onOpenFull={() => {
                 setSelectedShotPlayer(selectedTacticalCard.name);
-                setTab("Carta de tiro");
+                openModule("Carta de tiro");
                 setSelectedTacticalPlayer("");
               }}
             />
@@ -4148,7 +4430,7 @@ export function ScoutingPlatform() {
         </>
       ) : null}
 
-      {tab === "Rotacion" ? (
+      {!showLaunchpad && tab === "Rotacion" ? (
         <section className="two-column rotation-board">
           {[
             { label: "Propia", rotation: model.ownRotation },
@@ -4202,7 +4484,7 @@ export function ScoutingPlatform() {
         </section>
       ) : null}
 
-      {tab === "Carta de tiro" ? (
+      {!showLaunchpad && tab === "Carta de tiro" ? (
         <section className="shot-module">
           <section className="module-panel shot-header-panel">
             <div className="module-heading">
@@ -4318,46 +4600,6 @@ export function ScoutingPlatform() {
                 <span><i className="legend-miss" /> Fallado</span>
                 <strong>{filteredShotSummary.attempts} tiros visibles · {filteredShotSummary.efficiency}</strong>
               </div>
-              <section className="shot-tactical-board" aria-label="Lectura tactica desde carta de tiro">
-                <article className="shot-tactical-column profile">
-                  <span>Perfil de juego</span>
-                  <strong>{activeShotAnalysis.profile}</strong>
-                  <p>{activeShotAnalysis.style}</p>
-                  {activeShotAnalysis.bullets.slice(0, 3).map((item) => (
-                    <small key={item}>{item}</small>
-                  ))}
-                </article>
-                <article className="shot-tactical-column">
-                  <span>Decisiones tipicas</span>
-                  {activeShotAnalysis.decisions.map((item) => (
-                    <p key={item}>{item}</p>
-                  ))}
-                </article>
-                <article className="shot-tactical-column strength">
-                  <span>Fortalezas reales</span>
-                  {activeShotAnalysis.strengths.slice(0, 3).map((item) => (
-                    <p key={item}>{item}</p>
-                  ))}
-                </article>
-                <article className="shot-tactical-column weakness">
-                  <span>Debilidades explotables</span>
-                  {activeShotAnalysis.weaknesses.slice(0, 3).map((item) => (
-                    <p key={item}>{item}</p>
-                  ))}
-                </article>
-                <article className="shot-tactical-column defense">
-                  <span>Plan defensivo</span>
-                  {activeShotAnalysis.defensiveInstructions.map((item) => (
-                    <p key={item}>{item}</p>
-                  ))}
-                </article>
-                <article className="shot-tactical-column attack">
-                  <span>Como atacarlo</span>
-                  {activeShotAnalysis.attackInstructions.map((item) => (
-                    <p key={item}>{item}</p>
-                  ))}
-                </article>
-              </section>
               {activeGamePlayerShots.length === 0 ? (
                 <div className="shot-empty-state">
                   <strong>Sin coordenadas para este jugador.</strong>
@@ -4369,7 +4611,17 @@ export function ScoutingPlatform() {
             <aside className="module-panel shot-analysis-panel">
               <div className="module-heading">
                 <p className="eyebrow">Lectura tactica</p>
-                <h3>Lectura rapida</h3>
+                <h3>{activeShotPlayer?.name ?? "Lectura rapida"}</h3>
+              </div>
+              <div className="shot-focus-card">
+                <span>{activeShotPlayer?.tag ?? "Jugador foco"}</span>
+                <strong>{activeShotAnalysis.profile}</strong>
+                <p>{activeShotAnalysis.style}</p>
+              </div>
+              <div className="shot-tab-strip" role="tablist" aria-label="Lectura por jugador">
+                <button className={shotInsightTab === "lectura" ? "active" : ""} onClick={() => setShotInsightTab("lectura")} type="button">Lectura</button>
+                <button className={shotInsightTab === "plan" ? "active" : ""} onClick={() => setShotInsightTab("plan")} type="button">Plan</button>
+                <button className={shotInsightTab === "tendencia" ? "active" : ""} onClick={() => setShotInsightTab("tendencia")} type="button">Tendencia</button>
               </div>
               <div className="half-split">
                 <article>
@@ -4383,51 +4635,114 @@ export function ScoutingPlatform() {
                   <small>tiros</small>
                 </article>
               </div>
-              <div className="shot-analysis-list">
-                <h4>Lectura central</h4>
-                {activeShotAnalysis.bullets.slice(0, 3).map((item) => (
-                  <p key={item}>{item}</p>
-                ))}
-              </div>
-              <div className="defense-plan">
-                <span>Regla principal</span>
-                <p>{activeShotAnalysis.defensiveInstructions[0] ?? `Negar zona dominante, contestar sin falta y comunicar si sube volumen en ${activeShotSummary.topQuarter}.`}</p>
-              </div>
-              <div className="player-mode-shot">
-                <span>Modo jugador</span>
-                <p>{activeShotAnalysis.defensiveInstructions[0] ?? `Negar zona dominante, contestar sin falta y comunicar si sube volumen en ${activeShotSummary.topQuarter}.`}</p>
-              </div>
-              <div className="shot-trend-card side-trend">
-                <header>
-                  <span>Tendencia vs base</span>
-                  <strong>{activeTrendLabel}</strong>
-                  <small>
-                    Forma muestra {activeRecentStats.games || activeShotGameCount} PJ · Base temporada · 3PT {activeRecentStats.threePct} vs {seasonThreePct(activeBasePlayerRow)}
-                  </small>
-                </header>
-                <div className="trend-metric-grid">
-                  {activeTrendRows.map((metric) => (
-                    <article key={metric.label}>
-                      <span>{metric.label}</span>
-                      <strong>{roundOne(metric.recent)}</strong>
-                      <small>Base {roundOne(metric.base)} · {signedDelta(metric.recent - metric.base, metric.suffix)}</small>
+              {shotInsightTab === "lectura" ? (
+                <>
+                  <div className="shot-analysis-list">
+                    <h4>Lectura central</h4>
+                    {activeShotAnalysis.bullets.slice(0, 3).map((item) => (
+                      <p key={item}>{item}</p>
+                    ))}
+                  </div>
+                  <div className="shot-insight-grid">
+                    <article className="shot-tactical-column profile">
+                      <span>Perfil de juego</span>
+                      <strong>{activeShotAnalysis.profile}</strong>
+                      <p>{activeShotAnalysis.style}</p>
                     </article>
-                  ))}
+                    <article className="shot-tactical-column">
+                      <span>Decisiones tipicas</span>
+                      {activeShotAnalysis.decisions.slice(0, 3).map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </article>
+                    <article className="shot-tactical-column strength">
+                      <span>Fortalezas reales</span>
+                      {activeShotAnalysis.strengths.slice(0, 3).map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </article>
+                    <article className="shot-tactical-column weakness">
+                      <span>Debilidades explotables</span>
+                      {activeShotAnalysis.weaknesses.slice(0, 3).map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </article>
+                  </div>
+                </>
+              ) : null}
+              {shotInsightTab === "plan" ? (
+                <>
+                  <div className="defense-plan">
+                    <span>Regla principal</span>
+                    <p>{activeShotAnalysis.defensiveInstructions[0] ?? `Negar zona dominante, contestar sin falta y comunicar si sube volumen en ${activeShotSummary.topQuarter}.`}</p>
+                  </div>
+                  <div className="player-mode-shot">
+                    <span>Modo jugador</span>
+                    <p>{activeShotAnalysis.defensiveInstructions[0] ?? `Negar zona dominante, contestar sin falta y comunicar si sube volumen en ${activeShotSummary.topQuarter}.`}</p>
+                  </div>
+                  <div className="shot-insight-grid">
+                    <article className="shot-tactical-column defense">
+                      <span>Plan defensivo</span>
+                      {activeShotAnalysis.defensiveInstructions.slice(0, 4).map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </article>
+                    <article className="shot-tactical-column attack">
+                      <span>Como atacarlo</span>
+                      {activeShotAnalysis.attackInstructions.slice(0, 4).map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </article>
+                  </div>
+                </>
+              ) : null}
+              {shotInsightTab === "tendencia" ? (
+                <div className="shot-trend-card side-trend">
+                  <header>
+                    <span>Tendencia vs base</span>
+                    <strong>{activeTrendLabel}</strong>
+                    <small>
+                      Forma muestra {activeRecentStats.games || activeShotGameCount} PJ · Base temporada · 3PT {activeRecentStats.threePct} vs {seasonThreePct(activeBasePlayerRow)}
+                    </small>
+                  </header>
+                  <div className="trend-metric-grid">
+                    {activeTrendRows.map((metric) => (
+                      <article key={metric.label}>
+                        <span>{metric.label}</span>
+                        <strong>{roundOne(metric.recent)}</strong>
+                        <small>Base {roundOne(metric.base)} · {signedDelta(metric.recent - metric.base, metric.suffix)}</small>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="shot-insight-grid">
+                    <article className="shot-tactical-column strength">
+                      <span>Fortalezas reales</span>
+                      {activeShotAnalysis.strengths.slice(0, 3).map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </article>
+                    <article className="shot-tactical-column weakness">
+                      <span>Debilidades explotables</span>
+                      {activeShotAnalysis.weaknesses.slice(0, 3).map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </article>
+                  </div>
+                  <p>
+                    {activeTrendLabel === "En alza"
+                      ? "Volumen reciente sobre su base: subir prioridad defensiva y negar primeros tiros comodos."
+                      : activeTrendLabel === "En caida"
+                        ? "Produccion reciente bajo su base: mantener scouting, pero no sobrerreaccionar si baja volumen."
+                        : "La muestra reciente confirma su base: plan confiable para preparar matchup."}
+                  </p>
                 </div>
-                <p>
-                  {activeTrendLabel === "En alza"
-                    ? "Volumen reciente sobre su base: subir prioridad defensiva y negar primeros tiros comodos."
-                    : activeTrendLabel === "En caida"
-                      ? "Produccion reciente bajo su base: mantener scouting, pero no sobrerreaccionar si baja volumen."
-                      : "La muestra reciente confirma su base: plan confiable para preparar matchup."}
-                </p>
-              </div>
+              ) : null}
             </aside>
           </section>
         </section>
       ) : null}
 
-      {tab === "Cuartos" ? (
+      {!showLaunchpad && tab === "Cuartos" ? (
         <section className="quarter-page">
           <section className="module-panel quarter-momentum-panel">
             <div className="module-heading">
@@ -4552,7 +4867,7 @@ export function ScoutingPlatform() {
         </section>
       ) : null}
 
-      {tab === "Comparativo" ? (
+      {!showLaunchpad && tab === "Comparativo" ? (
         <section className="comparison-page">
           <section className="comparison-board">
             <article className="comparison-team-card own">
@@ -4651,7 +4966,7 @@ export function ScoutingPlatform() {
         </section>
       ) : null}
 
-      {tab === "Informes" ? (
+      {!showLaunchpad && tab === "Informes" ? (
         <section className="module-panel">
           <div className="module-heading">
             <p className="eyebrow">Descargables editables</p>
@@ -4728,7 +5043,7 @@ export function ScoutingPlatform() {
         </section>
       ) : null}
 
-      {tab === "Presentaciones" ? (
+      {!showLaunchpad && tab === "Presentaciones" ? (
         <section className="module-panel">
           <div className="module-heading">
             <p className="eyebrow">Deck tactico</p>
@@ -4748,7 +5063,7 @@ export function ScoutingPlatform() {
         </section>
       ) : null}
 
-      {tab === "Notas" ? (
+      {!showLaunchpad && tab === "Notas" ? (
         <section className="module-panel">
           <div className="module-heading">
             <p className="eyebrow">Privado por perfil</p>
@@ -4777,7 +5092,7 @@ export function ScoutingPlatform() {
         </section>
       ) : null}
 
-      {tab === "Admin" && canAdmin ? (
+      {!showLaunchpad && tab === "Admin" && canAdmin ? (
         <section className="two-column">
           <section className="module-panel">
             <div className="module-heading">
