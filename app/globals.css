@@ -1778,9 +1778,13 @@ input {
 
 .prep-stage {
   display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.45fr);
-  gap: 18px;
+  grid-template-columns: minmax(280px, 420px) minmax(620px, 1fr);
+  gap: 24px;
   align-items: start;
+}
+
+.prep-stage > * {
+  min-width: 0;
 }
 
 .prep-bar-header {
@@ -1833,19 +1837,23 @@ input {
   color: #64716b;
   font-size: 0.75rem;
   line-height: 1.28;
-  text-align: right;
+  text-align: left;
 }
 
 .prep-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: 14px;
+  align-content: start;
+  width: 100%;
+  min-width: 0;
 }
 
 .prep-field {
   display: grid;
   gap: 9px;
   min-width: 0;
+  width: 100%;
   border: 1px solid rgba(22, 31, 27, 0.08);
   border-radius: 12px;
   padding: 14px 14px 15px;
@@ -1877,6 +1885,7 @@ input {
 }
 
 .prep-field select {
+  width: 100%;
   min-height: 48px;
   border: 1px solid rgba(22, 31, 27, 0.12);
   border-radius: 10px;
